@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "last_updated": "2026-08-28T09:01:02Z",
+  "last_updated": "2026-08-28T09:01:47Z",
   "completed_count": 14,
   "items": {
     "01_1 The Practice of Medicine.pdf": {
@@ -47,9 +47,10 @@
     },
     "08_8 The Value of the Physical Examination in Modern Medicine.pdf": {
       "bundle_name": "08_8 The Value of the Physical Examination in Modern Medicine.pdfedit",
+      "light_bundle_name": "08_8 The Value of the Physical Examination in Modern Medicine.pdfeditlight",
       "source_path": "inputs/08_8 The Value of the Physical Examination in Modern Medicine.pdf",
       "status": "completed",
-      "completed_at": "2026-08-28T08:05:55Z"
+      "completed_at": "2026-08-28T09:01:47Z"
     },
     "09_9 Physician Well-Being.pdf": {
       "bundle_name": "09_9 Physician Well-Being.pdfedit",
