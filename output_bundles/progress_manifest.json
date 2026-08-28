@@ -1,7 +1,7 @@
 {
   "version": "2.0",
-  "last_updated": "2026-08-28T08:05:55Z",
-  "completed_count": 8,
+  "last_updated": "2026-08-28T08:06:11Z",
+  "completed_count": 9,
   "items": {
     "01_1 The Practice of Medicine.pdf": {
       "bundle_name": "01_1 The Practice of Medicine.pdfedit",
@@ -50,6 +50,12 @@
       "source_path": "inputs/08_8 The Value of the Physical Examination in Modern Medicine.pdf",
       "status": "completed",
       "completed_at": "2026-08-28T08:05:55Z"
+    },
+    "09_9 Physician Well-Being.pdf": {
+      "bundle_name": "09_9 Physician Well-Being.pdfedit",
+      "source_path": "inputs/09_9 Physician Well-Being.pdf",
+      "status": "completed",
+      "completed_at": "2026-08-28T08:06:11Z"
     }
   }
 }
