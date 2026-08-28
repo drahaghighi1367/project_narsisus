@@ -40,21 +40,20 @@ jobs:
           pip install --upgrade pip
           pip install pymupdf docling rapidocr-onnxruntime
 
-      - name: Run Resumable Extraction Pipeline
+      - name: Configure Git Bot
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Run Resumable Extraction Pipeline (One-by-One Push)
         env:
           PDFEDIT_PASSWORD: ${{ secrets.PDFEDIT_WORKSPACE_PASSWORD }}
         run: |
           python scripts/batch_pdf_to_pdfedit.py \
             "${{ github.event.inputs.input_pattern || 'inputs/**/*.pdf' }}" \
             -o "${{ github.event.inputs.output_dir || 'output_bundles' }}" \
-            --resume
-
-      - name: Commit & Push Progress Checkpoints and Bundles
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add output_bundles/
-          git diff --quiet && git diff --staged --quiet || (git commit -m "feat(bundles): add processed .pdfedit workspaces [skip ci]" && git push)
+            --resume \
+            --git-push
 
       - name: Upload .pdfedit Bundles as Artifact
         uses: actions/upload-artifact@v4
