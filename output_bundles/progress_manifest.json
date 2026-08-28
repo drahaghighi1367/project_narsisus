@@ -1,7 +1,7 @@
 {
   "version": "2.0",
-  "last_updated": "2026-08-28T05:29:25Z",
-  "completed_count": 2,
+  "last_updated": "2026-08-28T05:30:00Z",
+  "completed_count": 3,
   "items": {
     "longman1.pdf": {
       "bundle_name": "longman1.pdfedit",
@@ -14,6 +14,12 @@
       "source_path": "inputs/01_1 The Practice of Medicine.pdf",
       "status": "completed",
       "completed_at": "2026-08-28T05:29:25Z"
+    },
+    "02_2 Promoting Good Health.pdf": {
+      "bundle_name": "02_2 Promoting Good Health.pdfedit",
+      "source_path": "inputs/02_2 Promoting Good Health.pdf",
+      "status": "completed",
+      "completed_at": "2026-08-28T05:30:00Z"
     }
   }
 }
