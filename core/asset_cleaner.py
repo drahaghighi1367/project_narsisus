@@ -1,4 +1,4 @@
-# E:/1405_pdf_editor/core/asset_cleaner.py
+# E:/pdf_cloud_pipeline/core/asset_cleaner.py
 
 import os
 import re

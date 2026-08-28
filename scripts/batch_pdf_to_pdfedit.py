@@ -1,3 +1,4 @@
+# E:/pdf_cloud_pipeline/scripts/batch_pdf_to_pdfedit.py
 
 """
 Universal Batch PDF to .pdfedit Processor
@@ -8,8 +9,6 @@ Converts batches of raw PDFs into unified, self-contained, and GUI-compatible
   - document.pdf
   - project.json (with deterministic two-way bundle linking)
   - docling_stream.json (frozen OCR/digital reading stream)
-  - images_expanded.pdf (human verification slices with red bboxes)
-  - tables_expanded.pdf (human verification slices with red bboxes)
 """
 
 import os
@@ -825,7 +824,7 @@ def process_single_pdf_to_pdfedit(
         state_data=manifest_data,
         docling_stream=docling_text_stream,
         password=password,
-        include_expanded_reviews=True
+        include_expanded_reviews=False
     )
 
     pdf.close()
@@ -1046,10 +1045,6 @@ def main():
     print(f"✨ Batch Summary: {new_completed} newly created, {skipped_count} resumed/skipped, {failed_count} failed")
     print(f"📁 Destination:   {os.path.abspath(args.output_dir)}")
     print("=" * 75)
-
-
-if __name__ == "__main__":
-    main()
 
 
 if __name__ == "__main__":

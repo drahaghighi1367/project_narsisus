@@ -1,4 +1,4 @@
-# E:/1405_pdf_editor/scripts/batch_extractor2.py
+# E:/pdf_cloud_pipeline/scripts/batch_extractor2.py
 
 import os
 import re

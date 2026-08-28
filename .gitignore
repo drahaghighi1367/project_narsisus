@@ -13,3 +13,4 @@ __pycache__/
 # Environment files & secrets
 .env
 *.token
+watcher

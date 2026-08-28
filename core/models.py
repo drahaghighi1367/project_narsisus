@@ -1,4 +1,4 @@
-# E:/1405_pdf_editor/core/models.py
+# E:/pdf_cloud_pipeline/core/models.py
 
 from __future__ import annotations
 from dataclasses import dataclass, field

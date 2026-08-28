@@ -1,4 +1,4 @@
-# E:/1405_pdf_editor/core/redactor.py
+# E:/pdf_cloud_pipeline/core/redactor.py
 
 import pymupdf
 from PyQt6.QtCore import QThread, pyqtSignal
