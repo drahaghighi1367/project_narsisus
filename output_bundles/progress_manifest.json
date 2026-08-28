@@ -1,7 +1,7 @@
 {
   "version": "2.0",
-  "last_updated": "2026-08-28T05:33:45Z",
-  "completed_count": 6,
+  "last_updated": "2026-08-28T05:34:45Z",
+  "completed_count": 7,
   "items": {
     "longman1.pdf": {
       "bundle_name": "longman1.pdfedit",
@@ -38,6 +38,12 @@
       "source_path": "inputs/05_5 Precision Medicine and Clinical Care.pdf",
       "status": "completed",
       "completed_at": "2026-08-28T05:33:45Z"
+    },
+    "06_6 Screening and Prevention of Disease.pdf": {
+      "bundle_name": "06_6 Screening and Prevention of Disease.pdfedit",
+      "source_path": "inputs/06_6 Screening and Prevention of Disease.pdf",
+      "status": "completed",
+      "completed_at": "2026-08-28T05:34:45Z"
     }
   }
 }
