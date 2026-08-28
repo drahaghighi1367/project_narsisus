@@ -5,6 +5,7 @@ import re
 import sys
 import json
 import glob
+import getpass
 import zipfile
 import tempfile
 import argparse
@@ -69,7 +70,6 @@ def get_element_rect(
     if "combined_bbox" in item and item["combined_bbox"]:
         return parse_bbox(item["combined_bbox"], page_w, page_h)
 
-    # Fallback: compute from component bboxes
     raw_b = item.get("raw_bbox") or item.get("image_bbox") or item.get("table_bbox")
     if not raw_b:
         return None
@@ -100,7 +100,6 @@ def generate_clean_markdown(
     if not docling_stream:
         return ""
 
-    # Compile verified exclusion zones per page
     exclusion_zones_by_page = {}
     for elem in elements:
         p_num = elem.get("page")
@@ -155,11 +154,9 @@ def generate_clean_markdown(
             clean_markdown_elements.append(f"\n\n---\n<!-- Page {p_num} -->\n\n")
             current_page = p_num
 
-        # De-hyphenate line break splits
         text = re.sub(r"^[■\s\u25a0\u25aa\u2022\-\*■]+", "", raw_text).strip()
         text = re.sub(r"(\w+)-\s+(\w+)", r"\1\2", text)
 
-        # Markdown layout formatting
         if "title" in label:
             clean_markdown_elements.append(f"# {text}")
         elif "section_header" in label:
@@ -184,7 +181,7 @@ def load_bundle_or_manifest(input_path: str, password: str | None = None) -> dic
     Loads either a unified .pdfedit ZIP project bundle (with optional password decryption)
     or a legacy JSON manifest. Returns standard payload with parsed elements and docling_stream.
     """
-    if input_path.lower().endswith(".pdfedit"):
+    if input_path.lower().endswith(".pdfedit") or input_path.lower().endswith(".pdfeditlight"):
         pdf_path, state_data, docling_stream = ProjectManager.load_project(input_path, password=password)
         temp_dir = os.path.dirname(pdf_path)
 
@@ -215,22 +212,13 @@ def resolve_pdf_path(
     source_pdf: str
 ) -> str:
     """
-    Resolve source_pdf.
-
-    Absolute paths are used directly.
-    Relative paths are resolved relative to the manifest.
+    Resolve source_pdf. Absolute paths are used directly; relative paths are relative to manifest.
     """
-
     if os.path.isabs(source_pdf):
-        return os.path.normpath(
-            source_pdf
-        )
+        return os.path.normpath(source_pdf)
 
     return os.path.normpath(
-        os.path.join(
-            os.path.dirname(manifest_path),
-            source_pdf
-        )
+        os.path.join(os.path.dirname(manifest_path), source_pdf)
     )
 
 
@@ -246,10 +234,7 @@ def export_expanded_elements_pdf(
     padding_x: float = 50.0
 ) -> int:
     """
-    Generates a full-height human-review PDF for rapid verification:
-    - Retains full page vertical height (y0 = 0 to y1 = page_height).
-    - Expands horizontal crop by padding_x (50pt) to left and right with page clamping.
-    - Draws a pure solid red bounding box (RGB: 1, 0, 0) indicating exact detected crop bounds.
+    Generates a full-height human-review PDF with 50pt padding and a red outline.
     """
     output_doc = pymupdf.open()
     toc_entries = []
@@ -280,7 +265,6 @@ def export_expanded_elements_pdf(
         if rect is None or rect.width <= 2 or rect.height <= 2:
             continue
 
-        # Compute full-height expanded horizontal slice
         exp_x0 = max(0.0, rect.x0 - padding_x)
         exp_x1 = min(pw, rect.x1 + padding_x)
         exp_w = exp_x1 - exp_x0
@@ -288,7 +272,6 @@ def export_expanded_elements_pdf(
 
         slice_clip = pymupdf.Rect(exp_x0, 0.0, exp_x1, ph)
 
-        # Create output page sized to the expanded slice
         new_page = output_doc.new_page(-1, width=exp_w, height=exp_h)
         new_page.show_pdf_page(
             pymupdf.Rect(0, 0, exp_w, exp_h),
@@ -297,7 +280,6 @@ def export_expanded_elements_pdf(
             clip=slice_clip
         )
 
-        # Draw pure red rectangle highlighting the exact detected element location
         rel_x0 = rect.x0 - exp_x0
         rel_y0 = rect.y0
         rel_x1 = rect.x1 - exp_x0
@@ -306,7 +288,7 @@ def export_expanded_elements_pdf(
 
         new_page.draw_rect(
             target_red_rect,
-            color=(1.0, 0.0, 0.0),  # Pure RED
+            color=(1.0, 0.0, 0.0),
             width=2.0
         )
 
@@ -331,122 +313,40 @@ def export_elements_pdf(
     output_path: str
 ) -> int:
     """
-    Export images/tables into a separate PDF.
-
-    Each element becomes one page.
-
-    IMPORTANT:
-    The crop includes the element itself PLUS all associated
-    caption/note bounding boxes.
+    Export images/tables into a separate PDF (1 element per page).
     """
-
     output_doc = pymupdf.open()
-
     toc_entries = []
-
     exported_count = 0
-
     total_pages = len(doc)
 
-    for index, item in enumerate(
-        elements,
-        start=1
-    ):
-
-        # ----------------------------------------------------
-        # Page
-        # ----------------------------------------------------
-
+    for index, item in enumerate(elements, start=1):
         p_num = item.get("page")
-
         if p_num is None:
-
-            print(
-                f"  [!] Skipping {element_type} #{index}: "
-                "missing 'page'."
-            )
-
             continue
-
         try:
             p_num = int(p_num)
-
-        except (
-            TypeError,
-            ValueError
-        ):
-
-            print(
-                f"  [!] Skipping {element_type} #{index}: "
-                f"invalid page number {p_num!r}."
-            )
-
+        except (TypeError, ValueError):
             continue
 
         p_idx = p_num - 1
-
-        if not (
-            0 <= p_idx < total_pages
-        ):
-
-            print(
-                f"  [!] Skipping {element_type} #{index}: "
-                f"page {p_num} outside PDF "
-                f"(1-{total_pages})."
-            )
-
+        if not (0 <= p_idx < total_pages):
             continue
 
         page = doc[p_idx]
 
-        # ----------------------------------------------------
-        # Complete element rectangle
-        # ----------------------------------------------------
-
         try:
-
             rect = get_element_rect(
                 item=item,
                 element_type=element_type,
                 page_w=page.rect.width,
                 page_h=page.rect.height
             )
-
-        except Exception as e:
-
-            print(
-                f"  [!] Skipping {element_type} #{index}: "
-                f"invalid bbox: {e}"
-            )
-
+        except Exception:
             continue
 
-        if rect is None:
-
-            print(
-                f"  [!] Skipping {element_type} #{index}: "
-                "could not determine bbox."
-            )
-
+        if rect is None or rect.width <= 2 or rect.height <= 2:
             continue
-
-        if (
-            rect.width <= 2
-            or rect.height <= 2
-        ):
-
-            print(
-                f"  [!] Skipping {element_type} #{index}: "
-                f"bbox too small "
-                f"({rect.width:.2f} x "
-                f"{rect.height:.2f})."
-            )
-
-            continue
-
-        # ----------------------------------------------------
-        # Create output page
-        # ----------------------------------------------------
 
         new_page = output_doc.new_page(
             -1,
@@ -455,60 +355,23 @@ def export_elements_pdf(
         )
 
         new_page.show_pdf_page(
-            pymupdf.Rect(
-                0,
-                0,
-                rect.width,
-                rect.height
-            ),
+            pymupdf.Rect(0, 0, rect.width, rect.height),
             doc,
             p_idx,
             clip=rect
         )
 
         exported_count += 1
-
-        # ----------------------------------------------------
-        # TOC
-        # ----------------------------------------------------
-
-        element_id = item.get(
-            "image_id"
-            if element_type == "image"
-            else "table_id",
-            f"{element_type}_{index}"
-        )
-
-        toc_entries.append(
-            [
-                1,
-                f"{element_type.capitalize()} {element_id}",
-                exported_count
-            ]
-        )
-
-    # --------------------------------------------------------
-    # Save
-    # --------------------------------------------------------
+        element_id = item.get("id", f"{element_type}_{index}")
+        toc_entries.append([1, f"{element_type.capitalize()} {element_id}", exported_count])
 
     if exported_count > 0:
-
-        output_doc.set_toc(
-            toc_entries
-        )
-
-        output_doc.save(
-            output_path,
-            deflate=True,
-            garbage=4
-        )
-
+        output_doc.set_toc(toc_entries)
+        output_doc.save(output_path, deflate=True, garbage=4)
         output_doc.close()
-
         return exported_count
 
     output_doc.close()
-
     return 0
 
 
@@ -524,202 +387,62 @@ def redact_elements(
 ) -> tuple[int, int]:
     """
     Redact all images/tables INCLUDING their captions/notes.
-
-    All redaction annotations are added first.
-
-    Only after all annotations have been added do we apply
-    the redactions page-by-page.
     """
-
-    fill_color = (
-        (1, 1, 1)
-        if fill_white
-        else False
-    )
-
+    fill_color = (1, 1, 1) if fill_white else False
     image_count = 0
     table_count = 0
-
     total_pages = len(doc)
 
-    # ========================================================
-    # ADD IMAGE REDACTIONS
-    # ========================================================
-
-    for index, item in enumerate(
-        images,
-        start=1
-    ):
-
+    for index, item in enumerate(images, start=1):
         p_num = item.get("page")
-
         if p_num is None:
-
-            print(
-                f"  [!] Cannot redact image #{index}: "
-                "missing 'page'."
-            )
-
             continue
-
         try:
             p_num = int(p_num)
-
-        except (
-            TypeError,
-            ValueError
-        ):
-
-            print(
-                f"  [!] Cannot redact image #{index}: "
-                f"invalid page {p_num!r}."
-            )
-
+        except (TypeError, ValueError):
             continue
 
         p_idx = p_num - 1
-
-        if not (
-            0 <= p_idx < total_pages
-        ):
-
-            print(
-                f"  [!] Cannot redact image #{index}: "
-                f"page {p_num} outside PDF."
-            )
-
+        if not (0 <= p_idx < total_pages):
             continue
 
         page = doc[p_idx]
-
         try:
-
-            rect = get_element_rect(
-                item=item,
-                element_type="image",
-                page_w=page.rect.width,
-                page_h=page.rect.height
-            )
-
-        except Exception as e:
-
-            print(
-                f"  [!] Cannot redact image #{index}: "
-                f"{e}"
-            )
-
+            rect = get_element_rect(item, "image", page.rect.width, page.rect.height)
+        except Exception:
             continue
 
-        if (
-            rect is not None
-            and rect.width > 0
-            and rect.height > 0
-        ):
-
-            page.add_redact_annot(
-                rect,
-                fill=fill_color
-            )
-
+        if rect is not None and rect.width > 0 and rect.height > 0:
+            page.add_redact_annot(rect, fill=fill_color)
             image_count += 1
 
-    # ========================================================
-    # ADD TABLE REDACTIONS
-    # ========================================================
-
-    for index, item in enumerate(
-        tables,
-        start=1
-    ):
-
+    for index, item in enumerate(tables, start=1):
         p_num = item.get("page")
-
         if p_num is None:
-
-            print(
-                f"  [!] Cannot redact table #{index}: "
-                "missing 'page'."
-            )
-
             continue
-
         try:
             p_num = int(p_num)
-
-        except (
-            TypeError,
-            ValueError
-        ):
-
-            print(
-                f"  [!] Cannot redact table #{index}: "
-                f"invalid page {p_num!r}."
-            )
-
+        except (TypeError, ValueError):
             continue
 
         p_idx = p_num - 1
-
-        if not (
-            0 <= p_idx < total_pages
-        ):
-
-            print(
-                f"  [!] Cannot redact table #{index}: "
-                f"page {p_num} outside PDF."
-            )
-
+        if not (0 <= p_idx < total_pages):
             continue
 
         page = doc[p_idx]
-
         try:
-
-            rect = get_element_rect(
-                item=item,
-                element_type="table",
-                page_w=page.rect.width,
-                page_h=page.rect.height
-            )
-
-        except Exception as e:
-
-            print(
-                f"  [!] Cannot redact table #{index}: "
-                f"{e}"
-            )
-
+            rect = get_element_rect(item, "table", page.rect.width, page.rect.height)
+        except Exception:
             continue
 
-        if (
-            rect is not None
-            and rect.width > 0
-            and rect.height > 0
-        ):
-
-            page.add_redact_annot(
-                rect,
-                fill=fill_color
-            )
-
+        if rect is not None and rect.width > 0 and rect.height > 0:
+            page.add_redact_annot(rect, fill=fill_color)
             table_count += 1
 
-    # ========================================================
-    # APPLY ALL REDACTIONS
-    # ========================================================
-
     for page in doc:
+        page.apply_redactions(images=1, graphics=2, text=0)
 
-        page.apply_redactions(
-            images=1,
-            graphics=2,
-            text=0
-        )
-
-    return (
-        image_count,
-        table_count
-    )
+    return image_count, table_count
 
 
 # ============================================================
@@ -744,7 +467,6 @@ def process_manifest(
     """
     data = load_bundle_or_manifest(input_path, password=password)
 
-    # Resolve PDF path
     if data["_is_pdfedit_bundle"]:
         pdf_path = data["_resolved_pdf_path"]
         orig_name = os.path.splitext(os.path.basename(data["_bundle_archive_path"]))[0]
@@ -758,7 +480,6 @@ def process_manifest(
     base_dir = output_dir if output_dir else os.path.dirname(input_path)
     os.makedirs(base_dir, exist_ok=True)
 
-    # Extract elements with robust fallback (supports elements, page_guidelines, and legacy schemas)
     elements = []
     if "elements" in data and data["elements"]:
         elements = data["elements"]
@@ -793,12 +514,10 @@ def process_manifest(
             tb.setdefault("type", "table")
         elements = images_legacy + tables_legacy
 
-    # Partition elements by type
     images = [e for e in elements if e.get("type") == "image"]
     tables = [e for e in elements if e.get("type") == "table"]
     generic = [e for e in elements if e.get("type") not in ("image", "table")]
 
-    # If boxes exist as generic (drawn or auto-selected in app), include them in image cutouts & redactions
     if generic:
         if not images and not tables:
             images = generic
@@ -806,40 +525,22 @@ def process_manifest(
             images.extend(generic)
 
     docling_stream = data.get("_docling_stream", [])
-
     doc = pymupdf.open(pdf_path)
-
     total_pages = len(doc)
 
     print()
     print("=" * 70)
-    print(
-        f"Processing: "
-        f"{os.path.basename(input_path)}"
-    )
-    print(
-        f"Source PDF: {orig_name}.pdf"
-    )
-    print(
-        f"Pages:      {total_pages}"
-    )
-    print(
-        f"Images:     {len(images)}"
-    )
-    print(
-        f"Tables:     {len(tables)}"
-    )
-    print(
-        f"Docling Text Nodes: {len(docling_stream)}"
-    )
+    print(f"Processing: {os.path.basename(input_path)}")
+    print(f"Source PDF: {orig_name}.pdf")
+    print(f"Pages:      {total_pages}")
+    print(f"Images:     {len(images)}")
+    print(f"Tables:     {len(tables)}")
+    print(f"Docling Text Nodes: {len(docling_stream)}")
     print("=" * 70)
 
     created_files = {}
 
-    # ========================================================
-    # STEP 1 — EXPORT IMAGES (Standard + Human Review Expanded)
-    # ========================================================
-
+    # STEP 1 — EXPORT IMAGES
     if images:
         images_pdf_filename = f"{orig_name}_images.pdf"
         images_pdf_path = os.path.join(base_dir, images_pdf_filename)
@@ -855,7 +556,6 @@ def process_manifest(
             created_files["images"] = images_pdf_path
             print(f"[*] Exported {exported_count} image(s) + captions -> {images_pdf_filename}")
 
-        # Human-Review Expanded Images PDF (Full height + 50pt padding + Red Box)
         images_exp_filename = f"{orig_name}_images_expanded.pdf"
         images_exp_path = os.path.join(base_dir, images_exp_filename)
         exp_count = export_expanded_elements_pdf(
@@ -867,12 +567,9 @@ def process_manifest(
         )
         if exp_count > 0:
             created_files["images_expanded"] = images_exp_path
-            print(f"[*] Generated {exp_count} expanded review images with red outlines -> {images_exp_filename}")
+            print(f"[*] Generated {exp_count} expanded review images -> {images_exp_filename}")
 
-    # ========================================================
-    # STEP 2 — EXPORT TABLES (Standard + Human Review Expanded)
-    # ========================================================
-
+    # STEP 2 — EXPORT TABLES
     if tables:
         tables_pdf_filename = f"{orig_name}_tables.pdf"
         tables_pdf_path = os.path.join(base_dir, tables_pdf_filename)
@@ -888,7 +585,6 @@ def process_manifest(
             created_files["tables"] = tables_pdf_path
             print(f"[*] Exported {exported_count} table(s) + notes -> {tables_pdf_filename}")
 
-        # Human-Review Expanded Tables PDF (Full height + 50pt padding + Red Box)
         tables_exp_filename = f"{orig_name}_tables_expanded.pdf"
         tables_exp_path = os.path.join(base_dir, tables_exp_filename)
         exp_count = export_expanded_elements_pdf(
@@ -900,12 +596,9 @@ def process_manifest(
         )
         if exp_count > 0:
             created_files["tables_expanded"] = tables_exp_path
-            print(f"[*] Generated {exp_count} expanded review tables with red outlines -> {tables_exp_filename}")
+            print(f"[*] Generated {exp_count} expanded review tables -> {tables_exp_filename}")
 
-    # ========================================================
-    # STEP 3 — STRIP IMAGES + TABLES + CAPTIONS/NOTES
-    # ========================================================
-
+    # STEP 3 — STRIP / REDACT ELEMENTS
     image_redacted_count, table_redacted_count = redact_elements(
         doc=doc,
         images=images,
@@ -923,10 +616,7 @@ def process_manifest(
     print(f"[*] Redacted {image_redacted_count} image(s) and {table_redacted_count} table(s)")
     print(f"  -> Saved clean striped PDF: {striped_pdf_filename}")
 
-    # ========================================================
-    # STEP 4 — INSTANT CLEAN MARKDOWN EXTRACTION (<0.05s)
-    # ========================================================
-
+    # STEP 4 — CLEAN MARKDOWN EXTRACTION
     if docling_stream:
         markdown_text = generate_clean_markdown(docling_stream, elements)
         md_filename = f"{orig_name}_article_body.md"
@@ -936,12 +626,9 @@ def process_manifest(
             f.write(markdown_text)
 
         created_files["markdown"] = md_path
-        print(f"[*] Generated 100% verified clean Markdown ({len(markdown_text)} chars) -> {md_filename}")
+        print(f"[*] Generated clean Markdown ({len(markdown_text)} chars) -> {md_filename}")
 
-    # ========================================================
-    # STEP 5 — OPTIONALLY EMBED ASSETS IN .PDFEDIT BUNDLE
-    # ========================================================
-
+    # STEP 5 — EMBED ASSETS IN BUNDLE
     if data["_is_pdfedit_bundle"] and embed_in_bundle:
         bundle_path = data["_bundle_archive_path"]
         try:
@@ -954,7 +641,6 @@ def process_manifest(
         except Exception as e:
             print(f"[!] Warning: Could not embed assets into bundle: {e}")
 
-    # Clean up temp folder if used
     if data.get("_temp_dir") and os.path.exists(data["_temp_dir"]):
         import shutil
         shutil.rmtree(data["_temp_dir"], ignore_errors=True)
@@ -968,146 +654,94 @@ def process_manifest(
 # ============================================================
 
 def main():
-
     parser = argparse.ArgumentParser(
-        description=(
-            "Extract images/tables with their captions/notes "
-            "and create a stripped PDF from the new JSON "
-            "manifest format."
-        )
+        description="Extract images/tables with captions/notes and generate striped PDF and clean Markdown."
     )
-
     parser.add_argument(
         "inputs",
         nargs="+",
-        help=(
-            "One or more .pdfedit project bundles, JSON manifest paths, "
-            "folders containing project files, or glob patterns."
-        )
+        help="One or more .pdfedit packages, JSON manifest paths, folders, or glob patterns."
     )
-
+    parser.add_argument(
+        "-p", "--password",
+        default=None,
+        help="Password for encrypted .pdfedit workspace packages (or set via PDFEDIT_PASSWORD env var)."
+    )
+    parser.add_argument(
+        "-o", "--output-dir",
+        default=None,
+        help="Custom destination directory for generated PDFs and Markdown."
+    )
     parser.add_argument(
         "--no-embed",
         action="store_true",
-        help=(
-            "Do not embed generated assets inside the .pdfedit archive."
-        )
+        help="Do not embed generated assets inside the .pdfedit archive."
     )
-
-    parser.add_argument(
-        "-p",
-        "--password",
-        default=None,
-        help=(
-            "Password to decrypt password-protected .pdfedit workspace bundles."
-        )
-    )
-
-    parser.add_argument(
-        "-o",
-        "--output-dir",
-        default=None,
-        help=(
-            "Custom destination directory for generated "
-            "PDFs. Defaults to the source PDF folder."
-        )
-    )
-
     parser.add_argument(
         "--white-fill",
         action="store_true",
-        help=(
-            "Fill redacted areas with solid white."
-        )
+        help="Fill redacted areas with solid white."
     )
 
     args = parser.parse_args()
 
-    # ========================================================
-    # FIND JSON FILES
-    # ========================================================
+    # Password resolution: CLI Flag -> Environment Variable
+    active_password = args.password or os.environ.get("PDFEDIT_PASSWORD")
 
     manifest_files = []
-
     for item in args.inputs:
-
         if os.path.isdir(item):
             manifest_files.extend(glob.glob(os.path.join(item, "*.pdfedit")))
+            manifest_files.extend(glob.glob(os.path.join(item, "*.pdfeditlight")))
             manifest_files.extend(glob.glob(os.path.join(item, "*.json")))
-
         elif os.path.isfile(item):
-
-            manifest_files.append(
-                item
-            )
-
+            manifest_files.append(item)
         else:
+            manifest_files.extend(glob.glob(item))
 
-            manifest_files.extend(
-                glob.glob(item)
-            )
-
-    # Remove duplicates while preserving order.
-    manifest_files = list(
-        dict.fromkeys(
-            os.path.normpath(path)
-            for path in manifest_files
-        )
-    )
+    manifest_files = list(dict.fromkeys(os.path.normpath(p) for p in manifest_files))
 
     if not manifest_files:
-
-        print(
-            "Error: No JSON manifest files found "
-            "for the given input paths.",
-            file=sys.stderr
-        )
-
+        print("Error: No .pdfedit or JSON manifest files found.", file=sys.stderr)
         sys.exit(1)
 
-    print(
-        f"Found {len(manifest_files)} "
-        f"JSON manifest(s) to process."
-    )
-
-    # ========================================================
-    # PROCESS
-    # ========================================================
+    print(f"Found {len(manifest_files)} project file(s) to process.")
 
     success_count = 0
-
     for manifest_path in manifest_files:
-
+        current_pw = active_password
         try:
-
             process_manifest(
                 input_path=manifest_path,
                 output_dir=args.output_dir,
                 fill_white=args.white_fill,
                 embed_in_bundle=not args.no_embed,
-                password=args.password
+                password=current_pw
             )
-
             success_count += 1
-
+        except PasswordRequiredError:
+            # Interactive prompt if running in a terminal without password provided
+            print(f"\n🔒 '{os.path.basename(manifest_path)}' is password-protected.")
+            try:
+                entered_pw = getpass.getpass("Enter workspace password: ").strip()
+                if entered_pw:
+                    process_manifest(
+                        input_path=manifest_path,
+                        output_dir=args.output_dir,
+                        fill_white=args.white_fill,
+                        embed_in_bundle=not args.no_embed,
+                        password=entered_pw
+                    )
+                    success_count += 1
+                else:
+                    print("[!] No password entered. Skipping file.", file=sys.stderr)
+            except Exception as ex:
+                print(f"[!] Extraction failed with entered password: {ex}", file=sys.stderr)
         except Exception as e:
-
-            print(
-                f"[!] Failed processing "
-                f"'{manifest_path}': {e}",
-                file=sys.stderr
-            )
-
-    # ========================================================
-    # SUMMARY
-    # ========================================================
+            print(f"[!] Failed processing '{manifest_path}': {e}", file=sys.stderr)
 
     print()
-    print(
-        f"Batch processing finished: "
-        f"{success_count}/"
-        f"{len(manifest_files)} succeeded."
-    )
+    print(f"Batch processing finished: {success_count}/{len(manifest_files)} succeeded.")
 
 
 if __name__ == "__main__":
