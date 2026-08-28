@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "last_updated": "2026-08-28T09:00:05Z",
+  "last_updated": "2026-08-28T09:00:50Z",
   "completed_count": 14,
   "items": {
     "01_1 The Practice of Medicine.pdf": {
@@ -33,9 +33,10 @@
     },
     "06_6 Screening and Prevention of Disease.pdf": {
       "bundle_name": "06_6 Screening and Prevention of Disease.pdfedit",
+      "light_bundle_name": "06_6 Screening and Prevention of Disease.pdfeditlight",
       "source_path": "inputs/06_6 Screening and Prevention of Disease.pdf",
       "status": "completed",
-      "completed_at": "2026-08-28T08:04:44Z"
+      "completed_at": "2026-08-28T09:00:50Z"
     },
     "07_7 The Safety and Quality of Health Care.pdf": {
       "bundle_name": "07_7 The Safety and Quality of Health Care.pdfedit",
