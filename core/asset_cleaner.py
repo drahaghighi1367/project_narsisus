@@ -18,44 +18,65 @@ def rect_iou(r1: pymupdf.Rect, r2: pymupdf.Rect) -> float:
     return (inter_area / union_area) if union_area > 0 else 0.0
 
 
-def deduplicate_rects(rect_list: list[pymupdf.Rect], iou_threshold: float = 0.45) -> list[pymupdf.Rect]:
+def deduplicate_rects(rect_list: list[pymupdf.Rect], iou_threshold: float = 0.05) -> list[pymupdf.Rect]:
     """
-    Consolidates overlapping bounding boxes and retains the maximum enclosing rectangle,
-    ensuring table headers, banners, and body rows remain united.
+    Iteratively consolidates overlapping, touching, or enclosed bounding boxes and retains the
+    minimum enclosing rectangle, ensuring sub-images inside composite figures,
+    overlapping image slices, table headers, banners, and body rows are completely united.
     """
-    unique: list[pymupdf.Rect] = []
-    for r in rect_list:
-        if r.width <= 0 or r.height <= 0:
-            continue
-        matched_idx = -1
-        for idx, u in enumerate(unique):
-            inter = pymupdf.Rect(r).intersect(u)
-            if not inter.is_empty and (inter.width > 0 and inter.height > 0):
-                inter_area = inter.width * inter.height
-                min_area = min(r.width * r.height, u.width * u.height)
-                if (inter_area / min_area) > 0.35 or rect_iou(r, u) > iou_threshold:
-                    matched_idx = idx
-                    break
-            elif (
-                abs(r.x0 - u.x0) < 6.0
-                and abs(r.y0 - u.y0) < 6.0
-                and abs(r.x1 - u.x1) < 6.0
-                and abs(r.y1 - u.y1) < 6.0
-            ):
-                matched_idx = idx
-                break
+    if not rect_list:
+        return []
 
-        if matched_idx >= 0:
-            u = unique[matched_idx]
-            unique[matched_idx] = pymupdf.Rect(
-                min(u.x0, r.x0),
-                min(u.y0, r.y0),
-                max(u.x1, r.x1),
-                max(u.y1, r.y1)
-            )
-        else:
-            unique.append(r)
-    return unique
+    current = [pymupdf.Rect(r) for r in rect_list if r.width > 0 and r.height > 0]
+    changed = True
+
+    while changed:
+        changed = False
+        new_list: list[pymupdf.Rect] = []
+        visited = [False] * len(current)
+
+        for i in range(len(current)):
+            if visited[i]:
+                continue
+            r = current[i]
+
+            for j in range(i + 1, len(current)):
+                if visited[j]:
+                    continue
+                cand = current[j]
+                inter = pymupdf.Rect(r).intersect(cand)
+
+                # Check if overlap exists, one is contained in another, or touching within 2pt
+                is_overlapping = False
+                if not inter.is_empty and inter.width > 0 and inter.height > 0:
+                    inter_area = inter.width * inter.height
+                    min_area = min(r.width * r.height, cand.width * cand.height)
+                    if min_area > 0 and ((inter_area / min_area) > 0.05 or rect_iou(r, cand) > iou_threshold):
+                        is_overlapping = True
+                elif (
+                    abs(r.x0 - cand.x0) < 4.0
+                    and abs(r.y0 - cand.y0) < 4.0
+                    and abs(r.x1 - cand.x1) < 4.0
+                    and abs(r.y1 - cand.y1) < 4.0
+                ):
+                    is_overlapping = True
+
+                if is_overlapping:
+                    r = pymupdf.Rect(
+                        min(r.x0, cand.x0),
+                        min(r.y0, cand.y0),
+                        max(r.x1, cand.x1),
+                        max(r.y1, cand.y1)
+                    )
+                    visited[j] = True
+                    changed = True
+
+            new_list.append(r)
+            visited[i] = True
+
+        current = new_list
+
+    return current
 
 
 def expand_table_with_header(page: pymupdf.Page, table_rect: pymupdf.Rect) -> pymupdf.Rect:
@@ -114,7 +135,8 @@ def expand_table_with_header(page: pymupdf.Page, table_rect: pymupdf.Rect) -> py
 def find_all_page_images(page: pymupdf.Page, min_w: float = 100.0, min_h: float = 100.0) -> list[pymupdf.Rect]:
     """
     Locates ALL raster images on the page by querying image catalog infos,
-    xref image placements, and form XObject image streams.
+    xref image placements, and form XObject image streams, merging any overlapping
+    or confined sub-images into the single enclosing bounding box.
     """
     found_rects = []
 

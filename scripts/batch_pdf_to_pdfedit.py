@@ -69,8 +69,8 @@ def git_commit_and_push(file_paths: list[str], commit_message: str) -> bool:
 # ============================================================
 
 CONFIG = {
-    "iou_overlap_threshold": 0.35,
-    "enclosure_threshold": 0.75,
+    "iou_overlap_threshold": 0.05,
+    "enclosure_threshold": 0.05,
     "figure_keywords": ["FIG", "FIGURE", "EXHIBIT", "PHOTO", "IMAGE", "PLATE", "CHART", "DIAGRAM"],
     "table_keywords": ["TABLE", "TAB", "EXHIBIT", "SCHEDULE"],
     "footnote_keywords": [
@@ -150,39 +150,80 @@ def bbox_iou(b1, b2) -> tuple[float, float]:
     return iou, enclosure
 
 
-def merge_candidates(candidates: list[dict], iou_thresh: float = 0.35, enc_thresh: float = 0.75) -> list[dict]:
-    merged = []
-    sorted_cands = sorted(
-        candidates,
-        key=lambda c: (c["bbox"][2] - c["bbox"][0]) * (c["bbox"][3] - c["bbox"][1]),
-        reverse=True
-    )
+def merge_candidates(candidates: list[dict], iou_thresh: float = 0.05, enc_thresh: float = 0.05) -> list[dict]:
+    """
+    Iteratively merges all bounding boxes on each page that overlap, touch,
+    or where one is contained/confined within another (e.g. sub-images inside a composite image),
+    producing the smallest enclosing bounding box covering all overlapping/confined components.
+    """
+    if not candidates:
+        return []
 
-    for cand in sorted_cands:
-        matched = False
-        for m in merged:
-            if m["page"] != cand["page"]:
-                continue
-            iou, enc = bbox_iou(m["bbox"], cand["bbox"])
-            if iou >= iou_thresh or enc >= enc_thresh:
-                m["bbox"] = (
-                    min(m["bbox"][0], cand["bbox"][0]),
-                    min(m["bbox"][1], cand["bbox"][1]),
-                    max(m["bbox"][2], cand["bbox"][2]),
-                    max(m["bbox"][3], cand["bbox"][3])
-                )
-                if cand["source"] not in m["sources"]:
-                    m["sources"].append(cand["source"])
-                matched = True
-                break
+    by_page: dict[int, list[dict]] = {}
+    for cand in candidates:
+        p = cand["page"]
+        srcs = list(cand["sources"]) if isinstance(cand.get("sources"), (list, tuple)) else [cand.get("source", "detected")]
+        by_page.setdefault(p, []).append({
+            "page": p,
+            "bbox": cand["bbox"],
+            "sources": srcs
+        })
 
-        if not matched:
-            merged.append({
-                "page": cand["page"],
-                "bbox": cand["bbox"],
-                "sources": [cand["source"]]
-            })
-    return merged
+    all_merged = []
+
+    for p, items in by_page.items():
+        changed = True
+        while changed:
+            changed = False
+            new_items = []
+            visited = [False] * len(items)
+
+            for i in range(len(items)):
+                if visited[i]:
+                    continue
+                cur = items[i]
+                cur_bbox = list(cur["bbox"])
+                cur_sources = list(cur["sources"])
+
+                for j in range(i + 1, len(items)):
+                    if visited[j]:
+                        continue
+                    other = items[j]
+                    other_bbox = other["bbox"]
+                    iou, enc = bbox_iou(cur_bbox, other_bbox)
+
+                    # Direct check for intersection, containment, or IoU overlap
+                    inter_x1 = max(cur_bbox[0], other_bbox[0])
+                    inter_y1 = max(cur_bbox[1], other_bbox[1])
+                    inter_x2 = min(cur_bbox[2], other_bbox[2])
+                    inter_y2 = min(cur_bbox[3], other_bbox[3])
+                    has_inter = (inter_x2 > inter_x1 and inter_y2 > inter_y1)
+
+                    if has_inter or iou > iou_thresh or enc > enc_thresh:
+                        cur_bbox = [
+                            min(cur_bbox[0], other_bbox[0]),
+                            min(cur_bbox[1], other_bbox[1]),
+                            max(cur_bbox[2], other_bbox[2]),
+                            max(cur_bbox[3], other_bbox[3])
+                        ]
+                        for s in other.get("sources", []):
+                            if s not in cur_sources:
+                                cur_sources.append(s)
+                        visited[j] = True
+                        changed = True
+
+                new_items.append({
+                    "page": p,
+                    "bbox": tuple(cur_bbox),
+                    "sources": cur_sources
+                })
+                visited[i] = True
+
+            items = new_items
+
+        all_merged.extend(items)
+
+    return all_merged
 
 
 def analyze_document_font_profile(page_spans_dict: dict, config: dict) -> dict:
