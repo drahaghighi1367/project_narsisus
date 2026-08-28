@@ -17,10 +17,6 @@ on:
         description: 'Duration to run (in minutes, max 350)'
         required: true
         default: '120'
-      rdp_password:
-        description: 'Set RDP password (if RDP is enabled)'
-        required: false
-        default: 'SuperSecret123!'
 
 jobs:
   ephemeral-runner:
@@ -43,8 +39,13 @@ jobs:
 
       - name: Install Desktop Environment & Optimize XRDP (RDP Mode)
         if: ${{ github.event.inputs.enable_rdp == 'true' }}
+        env:
+          RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
         run: |
           set -e
+          # Fallback to a random generated password if the secret wasn't added
+          PASS="${RDP_PASSWORD:-$(openssl rand -base64 12)}"
+
           echo "[-] Installing lightweight XFCE desktop & XRDP..."
           sudo apt-get update -y
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
@@ -60,12 +61,11 @@ jobs:
           sudo chown runner:runner /home/runner/.xsession
 
           echo "[-] Applying Low-Latency Performance Tweaks to XRDP..."
-          # Set default color depth to 16-bit to reduce bandwidth/lag
           sudo sed -i 's/max_bpp=32/max_bpp=16/g' /etc/xrdp/xrdp.ini
           sudo sed -i 's/crypt_level=high/crypt_level=low/g' /etc/xrdp/xrdp.ini
 
-          echo "[-] Setting RDP credentials..."
-          echo "runner:${{ github.event.inputs.rdp_password }}" | sudo chpasswd
+          echo "[-] Setting RDP password securely from secret..."
+          echo "runner:$PASS" | sudo chpasswd
           sudo adduser xrdp ssl-cert
 
           echo "[-] Starting XRDP Service..."
@@ -103,7 +103,7 @@ jobs:
           if [ "${{ github.event.inputs.enable_rdp }}" = "true" ]; then
             echo "RDP Host:          gh-vpn-runner (or $TS_IP)"
             echo "RDP User:          runner"
-            echo "RDP Password:      ${{ github.event.inputs.rdp_password }}"
+            echo "RDP Password:      [READ FROM REPO SECRETS: RDP_PASSWORD]"
           fi
           echo "================================================="
 
