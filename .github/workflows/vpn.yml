@@ -12,11 +12,11 @@ on:
         description: 'Enable GUI Remote Desktop (XFCE + XRDP)'
         type: boolean
         required: true
-        default: true
+        default: false
       duration_minutes:
         description: 'Duration to run (in minutes, max 350)'
         required: true
-        default: '120'
+        default: '360'
 
 jobs:
   ephemeral-runner:
@@ -43,7 +43,6 @@ jobs:
           RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
         run: |
           set -e
-          # Fallback to a random generated password if the secret wasn't added
           PASS="${RDP_PASSWORD:-$(openssl rand -base64 12)}"
 
           echo "[-] Installing lightweight XFCE desktop & XRDP..."
