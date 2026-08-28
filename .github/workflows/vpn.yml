@@ -1,39 +1,52 @@
-name: Ephemeral VPN + Remote Desktop
+name: Ephemeral Runner (VPN / Remote Desktop)
 
 on:
   workflow_dispatch:
     inputs:
+      enable_vpn:
+        description: 'Enable VPN (Tailscale Exit Node)'
+        type: boolean
+        required: true
+        default: true
+      enable_rdp:
+        description: 'Enable GUI Remote Desktop (XFCE + XRDP)'
+        type: boolean
+        required: true
+        default: true
       duration_minutes:
         description: 'Duration to run (in minutes, max 350)'
         required: true
         default: '120'
       rdp_password:
-        description: 'Set a password for the RDP user (runner)'
-        required: true
+        description: 'Set RDP password (if RDP is enabled)'
+        required: false
         default: 'SuperSecret123!'
 
 jobs:
-  vpn-rdp:
-    name: Start VPN & Remote Desktop
+  ephemeral-runner:
+    name: Start Runner Gateway
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
     steps:
-      - name: Enable IPv4/IPv6 Routing & Firewall
+      - name: Enable IPv4/IPv6 Routing & Firewall (VPN Mode)
+        if: ${{ github.event.inputs.enable_vpn == 'true' }}
         run: |
           set -e
+          echo "[-] Configuring IP Forwarding and NAT for VPN..."
           sudo sysctl -w net.ipv4.ip_forward=1
           sudo sysctl -w net.ipv6.conf.all.forwarding=1
           DEFAULT_IFACE=$(ip route show default | awk '{print $5}' | head -n1)
           sudo iptables -t nat -A POSTROUTING -o "$DEFAULT_IFACE" -j MASQUERADE
           sudo ip6tables -t nat -A POSTROUTING -o "$DEFAULT_IFACE" -j MASQUERADE
+          sudo ethtool -K "$DEFAULT_IFACE" rx-udp-gro-forwarding on rx-gro-list off || true
 
-      - name: Install Desktop Environment (XFCE) & XRDP
+      - name: Install Desktop Environment & Optimize XRDP (RDP Mode)
+        if: ${{ github.event.inputs.enable_rdp == 'true' }}
         run: |
           set -e
-          echo "[-] Updating packages and installing XFCE + XRDP..."
+          echo "[-] Installing lightweight XFCE desktop & XRDP..."
           sudo apt-get update -y
-          # Install lightweight desktop and RDP server without interactive prompts
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
             xfce4 \
             xfce4-goodies \
@@ -42,45 +55,62 @@ jobs:
             dbus-x11 \
             firefox
 
-          echo "[-] Configuring XFCE session for XRDP..."
+          echo "[-] Setting up XFCE session..."
           echo "xfce4-session" > /home/runner/.xsession
           sudo chown runner:runner /home/runner/.xsession
 
-          echo "[-] Setting RDP user password..."
+          echo "[-] Applying Low-Latency Performance Tweaks to XRDP..."
+          # Set default color depth to 16-bit to reduce bandwidth/lag
+          sudo sed -i 's/max_bpp=32/max_bpp=16/g' /etc/xrdp/xrdp.ini
+          sudo sed -i 's/crypt_level=high/crypt_level=low/g' /etc/xrdp/xrdp.ini
+
+          echo "[-] Setting RDP credentials..."
           echo "runner:${{ github.event.inputs.rdp_password }}" | sudo chpasswd
           sudo adduser xrdp ssl-cert
 
           echo "[-] Starting XRDP Service..."
           sudo systemctl restart xrdp
 
-      - name: Install & Start Tailscale
+      - name: Install & Connect Tailscale
         env:
           TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          ENABLE_VPN: ${{ github.event.inputs.enable_vpn }}
         run: |
           set -e
+          echo "[-] Installing Tailscale..."
           curl -fsSL https://tailscale.com/install.sh | sh
-          sudo tailscale up \
-            --authkey="${TAILSCALE_AUTH_KEY}" \
-            --advertise-exit-node \
-            --ssh \
-            --hostname=gh-vpn-runner \
-            --accept-routes
+
+          TS_FLAGS="--authkey=${TAILSCALE_AUTH_KEY} --ssh --hostname=gh-vpn-runner --accept-routes"
+          
+          if [ "$ENABLE_VPN" = "true" ]; then
+            echo "[-] Enabling Exit Node capability..."
+            TS_FLAGS="$TS_FLAGS --advertise-exit-node"
+          fi
+
+          echo "[-] Bringing Tailscale up..."
+          sudo tailscale up $TS_FLAGS
 
       - name: Print Connection Details
         run: |
           TS_IP=$(tailscale ip -4)
           echo "================================================="
-          echo " RDP + VPN GATEWAY IS ONLINE!"
+          echo " RUNNER IS ONLINE AND READY"
           echo "================================================="
-          echo "Tailscale IP: $TS_IP"
-          echo "RDP Username: runner"
-          echo "RDP Password: ${{ github.event.inputs.rdp_password }}"
+          echo "Tailscale IP:      $TS_IP"
+          echo "SSH Access:        tailscale ssh runner@gh-vpn-runner"
+          echo "VPN Exit Node:     ${{ github.event.inputs.enable_vpn }}"
+          echo "RDP GUI Enabled:   ${{ github.event.inputs.enable_rdp }}"
+          if [ "${{ github.event.inputs.enable_rdp }}" = "true" ]; then
+            echo "RDP Host:          gh-vpn-runner (or $TS_IP)"
+            echo "RDP User:          runner"
+            echo "RDP Password:      ${{ github.event.inputs.rdp_password }}"
+          fi
           echo "================================================="
 
-      - name: Keep-Alive Loop
+      - name: Keep-Alive Loop with Heartbeat
         run: |
           cleanup() {
-            echo "[-] Signal received. Logging out..."
+            echo "[-] Signal received. Logging out cleanly..."
             sudo tailscale logout || true
             exit 0
           }
@@ -93,7 +123,8 @@ jobs:
 
           while [ $ELAPSED -lt $TOTAL_SECONDS ]; do
             REMAINING=$(( (TOTAL_SECONDS - ELAPSED) / 60 ))
-            echo "[Heartbeat $(date +'%T')] Alive | Remaining: ~${REMAINING} min"
+            ACTIVE_CONNS=$(sudo netstat -natp 2>/dev/null | grep ESTABLISHED | wc -l)
+            echo "[Heartbeat $(date +'%T')] Alive | Remaining: ~${REMAINING} min | Active Connections: ${ACTIVE_CONNS}"
             sleep $INTERVAL
             ELAPSED=$((ELAPSED + INTERVAL))
           done
