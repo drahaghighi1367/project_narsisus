@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "last_updated": "2026-08-28T09:01:59Z",
+  "last_updated": "2026-08-28T09:02:43Z",
   "completed_count": 14,
   "items": {
     "01_1 The Practice of Medicine.pdf": {
@@ -61,9 +61,10 @@
     },
     "10_10 Diagnosis_ Reducing Errors and Improving Quality.pdf": {
       "bundle_name": "10_10 Diagnosis_ Reducing Errors and Improving Quality.pdfedit",
+      "light_bundle_name": "10_10 Diagnosis_ Reducing Errors and Improving Quality.pdfeditlight",
       "source_path": "inputs/10_10 Diagnosis_ Reducing Errors and Improving Quality.pdf",
       "status": "completed",
-      "completed_at": "2026-08-28T08:07:06Z"
+      "completed_at": "2026-08-28T09:02:43Z"
     },
     "11_11 Racial and Ethnic Disparities in Health Care.pdf": {
       "bundle_name": "11_11 Racial and Ethnic Disparities in Health Care.pdfedit",
