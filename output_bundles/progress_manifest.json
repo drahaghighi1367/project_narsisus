@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "last_updated": "2026-08-28T08:57:51Z",
+  "last_updated": "2026-08-28T08:58:18Z",
   "completed_count": 14,
   "items": {
     "01_1 The Practice of Medicine.pdf": {
@@ -12,9 +12,10 @@
     },
     "02_2 Promoting Good Health.pdf": {
       "bundle_name": "02_2 Promoting Good Health.pdfedit",
+      "light_bundle_name": "02_2 Promoting Good Health.pdfeditlight",
       "source_path": "inputs/02_2 Promoting Good Health.pdf",
       "status": "completed",
-      "completed_at": "2026-08-28T08:27:10Z"
+      "completed_at": "2026-08-28T08:58:18Z"
     },
     "03_3 Vaccine Opposition and Hesitancy.pdf": {
       "bundle_name": "03_3 Vaccine Opposition and Hesitancy.pdfedit",
