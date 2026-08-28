@@ -1,7 +1,7 @@
 {
   "version": "2.0",
-  "last_updated": "2026-08-28T05:35:59Z",
-  "completed_count": 9,
+  "last_updated": "2026-08-28T05:36:17Z",
+  "completed_count": 10,
   "items": {
     "longman1.pdf": {
       "bundle_name": "longman1.pdfedit",
@@ -56,6 +56,12 @@
       "source_path": "inputs/08_8 The Value of the Physical Examination in Modern Medicine.pdf",
       "status": "completed",
       "completed_at": "2026-08-28T05:35:59Z"
+    },
+    "09_9 Physician Well-Being.pdf": {
+      "bundle_name": "09_9 Physician Well-Being.pdfedit",
+      "source_path": "inputs/09_9 Physician Well-Being.pdf",
+      "status": "completed",
+      "completed_at": "2026-08-28T05:36:17Z"
     }
   }
 }
