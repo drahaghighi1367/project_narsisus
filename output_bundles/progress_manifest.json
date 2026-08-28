@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "last_updated": "2026-08-28T09:05:07Z",
+  "last_updated": "2026-08-28T09:26:33Z",
   "completed_count": 14,
   "items": {
     "01_1 The Practice of Medicine.pdf": {
@@ -8,28 +8,28 @@
       "light_bundle_name": "01_1 The Practice of Medicine.pdfeditlight",
       "source_path": "inputs/01_1 The Practice of Medicine.pdf",
       "status": "completed",
-      "completed_at": "2026-08-28T08:57:51Z"
+      "completed_at": "2026-08-28T09:25:39Z"
     },
     "02_2 Promoting Good Health.pdf": {
       "bundle_name": "02_2 Promoting Good Health.pdfedit",
       "light_bundle_name": "02_2 Promoting Good Health.pdfeditlight",
       "source_path": "inputs/02_2 Promoting Good Health.pdf",
       "status": "completed",
-      "completed_at": "2026-08-28T08:58:18Z"
+      "completed_at": "2026-08-28T09:25:39Z"
     },
     "03_3 Vaccine Opposition and Hesitancy.pdf": {
       "bundle_name": "03_3 Vaccine Opposition and Hesitancy.pdfedit",
       "light_bundle_name": "03_3 Vaccine Opposition and Hesitancy.pdfeditlight",
       "source_path": "inputs/03_3 Vaccine Opposition and Hesitancy.pdf",
       "status": "completed",
-      "completed_at": "2026-08-28T08:58:53Z"
+      "completed_at": "2026-08-28T09:25:39Z"
     },
     "04_4 Decision-Making in Clinical Medicine.pdf": {
       "bundle_name": "04_4 Decision-Making in Clinical Medicine.pdfedit",
       "light_bundle_name": "04_4 Decision-Making in Clinical Medicine.pdfeditlight",
       "source_path": "inputs/04_4 Decision-Making in Clinical Medicine.pdf",
       "status": "completed",
-      "completed_at": "2026-08-28T08:59:26Z"
+      "completed_at": "2026-08-28T09:25:39Z"
     },
     "06_6 Screening and Prevention of Disease.pdf": {
       "bundle_name": "06_6 Screening and Prevention of Disease.pdfedit",
@@ -98,7 +98,7 @@
       "light_bundle_name": "05_5 Precision Medicine and Clinical Care.pdfeditlight",
       "source_path": "inputs/05_5 Precision Medicine and Clinical Care.pdf",
       "status": "completed",
-      "completed_at": "2026-08-28T09:00:05Z"
+      "completed_at": "2026-08-28T09:26:33Z"
     }
   }
 }
