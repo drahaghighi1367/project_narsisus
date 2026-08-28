@@ -10,7 +10,7 @@ on:
         required: false
         default: 'inputs/**/*.pdf'
       output_dir:
-        description: 'Output directory for .pdfedit bundles'
+        description: 'Output directory for bundles'
         required: false
         default: 'output_bundles'
   schedule:
@@ -45,7 +45,7 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Run Resumable Extraction Pipeline (One-by-One Push)
+      - name: Run Resumable Extraction Pipeline (Creates .pdfedit & .pdfeditlight)
         env:
           PDFEDIT_PASSWORD: ${{ secrets.PDFEDIT_WORKSPACE_PASSWORD }}
         run: |
@@ -55,9 +55,11 @@ jobs:
             --resume \
             --git-push
 
-      - name: Upload .pdfedit Bundles as Artifact
+      - name: Upload Bundles as Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pdfedit-bundles
-          path: output_bundles/*.pdfedit
+          name: pdfedit-all-bundles
+          path: |
+            output_bundles/*.pdfedit
+            output_bundles/*.pdfeditlight
           if-no-files-found: ignore

@@ -28,6 +28,16 @@ class InvalidPasswordError(Exception):
     pass
 
 
+class SourcePdfNotFoundError(Exception):
+    """Raised when rehydrating a .pdfeditlight bundle and matching source PDF cannot be found."""
+    pass
+
+
+class ChecksumMismatchError(Exception):
+    """Raised when the candidate source PDF SHA-256 does not match the manifest checksum."""
+    pass
+
+
 # ---------------------------------------------------------------------------
 # High-Performance Native Authenticated Encryption Engine (<0.04s, Zero External Deps)
 # PBKDF2-HMAC-SHA256 (30k rounds) + OpenSSL C-Stream CTR + HMAC-SHA256 (Encrypt-then-MAC)
@@ -123,7 +133,11 @@ class EncryptedPackageEngine:
 
 
 class ProjectManager:
-    """Handles lossless packaging, extracting, and password encryption for .pdfedit packages."""
+    """
+    Handles packaging, extraction, conversion, and password encryption for both:
+      - Full .pdfedit packages (contains document.pdf + project.json + docling_stream.json)
+      - Lightweight .pdfeditlight packages (contains project.json + docling_stream.json, referencing original PDF)
+    """
 
     VERSION = "2.0"
 
@@ -224,77 +238,17 @@ class ProjectManager:
 
     @classmethod
     def is_encrypted(cls, project_path: str) -> bool:
-        """Returns True if the .pdfedit file is encrypted with password protection."""
+        """Returns True if the package is encrypted with password protection."""
         return EncryptedPackageEngine.is_encrypted_file(project_path)
 
     @classmethod
-    def generate_expanded_review_pdf_bytes(
-        cls,
-        doc: pymupdf.Document,
-        elements: list[dict],
-        element_type: str,
-        padding_x: float = 50.0
-    ) -> bytes | None:
-        """Renders expanded full-height human review slice PDF bytes with red bounding box overlays."""
-        if not doc or not elements:
-            return None
-
-        from core.utils import get_element_rect
-        review_doc = pymupdf.open()
-        toc = []
-        count = 0
-        total_pages = len(doc)
-
-        for index, item in enumerate(elements, start=1):
-            if item.get("type") != element_type:
-                continue
-            p_num = item.get("page")
-            if p_num is None:
-                continue
-            p_idx = int(p_num) - 1
-            if not (0 <= p_idx < total_pages):
-                continue
-
-            page = doc[p_idx]
-            pw, ph = page.rect.width, page.rect.height
-            try:
-                rect = get_element_rect(item, element_type, pw, ph)
-            except Exception:
-                continue
-
-            if rect is None or rect.width <= 2 or rect.height <= 2:
-                continue
-
-            exp_x0 = max(0.0, rect.x0 - padding_x)
-            exp_x1 = min(pw, rect.x1 + padding_x)
-            exp_w = exp_x1 - exp_x0
-            exp_h = ph
-
-            slice_clip = pymupdf.Rect(exp_x0, 0.0, exp_x1, ph)
-            new_page = review_doc.new_page(-1, width=exp_w, height=exp_h)
-            new_page.show_pdf_page(
-                pymupdf.Rect(0, 0, exp_w, exp_h),
-                doc,
-                p_idx,
-                clip=slice_clip
-            )
-
-            # Pure RED inspection overlay box
-            rel_box = pymupdf.Rect(rect.x0 - exp_x0, rect.y0, rect.x1 - exp_x0, rect.y1)
-            new_page.draw_rect(rel_box, color=(1.0, 0.0, 0.0), width=2.0)
-
-            count += 1
-            elem_id = item.get("id", f"{element_type}_{index}")
-            toc.append([1, f"Review {element_type.capitalize()} #{elem_id} (Page {p_num})", count])
-
-        if count > 0:
-            review_doc.set_toc(toc)
-            pdf_bytes = review_doc.tobytes(deflate=True, garbage=1)
-            review_doc.close()
-            return pdf_bytes
-
-        review_doc.close()
-        return None
+    def compute_file_sha256(cls, file_path: str) -> str:
+        """Computes SHA-256 hash of a file."""
+        hasher = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            while chunk := f.read(65536):
+                hasher.update(chunk)
+        return hasher.hexdigest()
 
     @classmethod
     def save_project(
@@ -304,12 +258,23 @@ class ProjectManager:
         state_data: dict,
         docling_stream: list | None = None,
         password: str | None = None,
-        include_expanded_reviews: bool = False
+        include_expanded_reviews: bool = False,
+        lightweight: bool = False
     ):
-        """Packs active state, page dimensions, and text stream into .pdfedit package with sub-0.05s execution."""
+        """
+        Packs active state into either:
+          - full `.pdfedit` (includes document.pdf)
+          - lightweight `.pdfeditlight` (excludes document.pdf, records sha256 & relative reference)
+        """
         t0 = time.time()
-        if not (project_path.lower().endswith(".pdfedit") or ".pdfedit" in project_path.lower()):
-            project_path += ".pdfedit"
+        is_light = lightweight or project_path.lower().endswith(".pdfeditlight")
+
+        if is_light:
+            if not project_path.lower().endswith(".pdfeditlight"):
+                project_path += ".pdfeditlight"
+        else:
+            if not project_path.lower().endswith(".pdfedit"):
+                project_path += ".pdfedit"
 
         temp_dir = tempfile.mkdtemp(prefix="pdfedit_save_")
         pdf_temp_path = os.path.join(temp_dir, "document.pdf")
@@ -318,11 +283,11 @@ class ProjectManager:
         temp_zip_path = os.path.join(temp_dir, "temp_package.zip")
 
         try:
-            # Fast save with minimal garbage collection overhead (<0.05s)
+            # Fast PDF save to temporary path to extract hash and metadata
             doc.save(pdf_temp_path, deflate=True, garbage=1)
             state_data["version"] = cls.VERSION
+            state_data["is_lightweight"] = bool(is_light)
 
-            # Compute PDF Hash and Two-Way Bundle Link IDs
             with open(pdf_temp_path, "rb") as pf:
                 pdf_bytes_for_hash = pf.read()
                 pdf_sha = hashlib.sha256(pdf_bytes_for_hash).hexdigest()
@@ -332,7 +297,12 @@ class ProjectManager:
             state_data.setdefault("bundle_id", hashlib.md5(f"{pdf_sha}_{bundle_base}".encode()).hexdigest())
             state_data["pdf_sha256"] = pdf_sha
 
-            # Populate page dimension metadata
+            # Record source reference
+            if is_light:
+                state_data["source_pdf"] = state_data.get("source_original_name") or "document.pdf"
+            else:
+                state_data["source_pdf"] = "document.pdf"
+
             state_data["page_dimensions"] = [
                 {"page": p_idx + 1, "width": round(p.rect.width, 2), "height": round(p.rect.height, 2)}
                 for p_idx, p in enumerate(doc)
@@ -346,9 +316,10 @@ class ProjectManager:
                 with open(stream_path, "w", encoding="utf-8") as f:
                     json.dump(stream_to_save, f, indent=2, ensure_ascii=False)
 
-            # Build unified ZIP archive
+            # Build unified ZIP archive (omits document.pdf if is_light)
             with zipfile.ZipFile(temp_zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-                zipf.write(pdf_temp_path, arcname="document.pdf")
+                if not is_light:
+                    zipf.write(pdf_temp_path, arcname="document.pdf")
                 zipf.write(manifest_path, arcname="project.json")
                 if os.path.exists(stream_path):
                     zipf.write(stream_path, arcname="docling_stream.json")
@@ -365,7 +336,8 @@ class ProjectManager:
             with open(project_path, "wb") as f:
                 f.write(final_bytes)
 
-            print(f"[PERF-DEBUG] Saved project bundle in {time.time() - t0:.3f}s: {os.path.basename(project_path)}")
+            pkg_type = "lightweight (.pdfeditlight)" if is_light else "full (.pdfedit)"
+            print(f"[PERF-DEBUG] Saved {pkg_type} bundle in {time.time() - t0:.3f}s: {os.path.basename(project_path)}")
 
         finally:
             for p in (pdf_temp_path, manifest_path, stream_path, temp_zip_path):
@@ -377,12 +349,10 @@ class ProjectManager:
                 except Exception: pass
 
     @classmethod
-    def load_project(cls, project_path: str, password: str | None = None) -> tuple[str, dict, list]:
+    def load_project_payload(cls, project_path: str, password: str | None = None) -> tuple[dict, list, bytes | None]:
         """
-        Extracts the .pdfedit archive into a temporary folder with high-speed decryption (<0.04s).
-        Returns (pdf_path, state_data, docling_stream).
+        Low-level extractor that reads (state_data, docling_stream, raw_pdf_bytes_if_any) from a .pdfedit or .pdfeditlight file.
         """
-        t0 = time.time()
         if not os.path.exists(project_path):
             raise FileNotFoundError(f"Project file not found: {project_path}")
 
@@ -397,7 +367,7 @@ class ProjectManager:
         else:
             zip_bytes = raw_bytes
 
-        temp_dir = tempfile.mkdtemp(prefix="pdfedit_load_")
+        temp_dir = tempfile.mkdtemp(prefix="pdfedit_payload_")
         temp_zip_path = os.path.join(temp_dir, "temp_package.zip")
 
         try:
@@ -406,28 +376,233 @@ class ProjectManager:
 
             with zipfile.ZipFile(temp_zip_path, "r") as zipf:
                 zipf.extractall(temp_dir)
-        finally:
-            if os.path.exists(temp_zip_path):
-                try: os.remove(temp_zip_path)
-                except Exception: pass
 
+            manifest_path = os.path.join(temp_dir, "project.json")
+            if not os.path.exists(manifest_path):
+                raise ValueError("Invalid package: missing project.json.")
+
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                state_data = json.load(f)
+
+            docling_stream = []
+            stream_path = os.path.join(temp_dir, "docling_stream.json")
+            if os.path.exists(stream_path):
+                with open(stream_path, "r", encoding="utf-8") as f:
+                    docling_stream = json.load(f)
+
+            pdf_extracted_path = os.path.join(temp_dir, "document.pdf")
+            pdf_bytes = None
+            if os.path.exists(pdf_extracted_path):
+                with open(pdf_extracted_path, "rb") as pf:
+                    pdf_bytes = pf.read()
+
+            return state_data, docling_stream, pdf_bytes
+
+        finally:
+            import shutil
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    @classmethod
+    def load_project(
+        cls,
+        project_path: str,
+        password: str | None = None,
+        source_pdf_hint: str | None = None
+    ) -> tuple[str, dict, list]:
+        """
+        Extracts the package into a temporary folder.
+        If it is a .pdfeditlight package, automatically locates the reference PDF, validates its SHA256 checksum,
+        and provides it transparently. Returns (pdf_path, state_data, docling_stream).
+        """
+        t0 = time.time()
+        state_data, docling_stream, pdf_bytes = cls.load_project_payload(project_path, password=password)
+
+        temp_dir = tempfile.mkdtemp(prefix="pdfedit_load_")
         pdf_extracted_path = os.path.join(temp_dir, "document.pdf")
         manifest_path = os.path.join(temp_dir, "project.json")
         stream_path = os.path.join(temp_dir, "docling_stream.json")
 
-        if not os.path.exists(pdf_extracted_path) or not os.path.exists(manifest_path):
-            raise ValueError("Invalid .pdfedit project package (missing document.pdf or project.json).")
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(state_data, f, indent=2, ensure_ascii=False)
 
-        with open(manifest_path, "r", encoding="utf-8") as f:
-            state_data = json.load(f)
+        if docling_stream:
+            with open(stream_path, "w", encoding="utf-8") as f:
+                json.dump(docling_stream, f, indent=2, ensure_ascii=False)
 
-        docling_stream = []
-        if os.path.exists(stream_path):
-            with open(stream_path, "r", encoding="utf-8") as f:
-                docling_stream = json.load(f)
+        if pdf_bytes is not None:
+            # Full bundle
+            with open(pdf_extracted_path, "wb") as pf:
+                pf.write(pdf_bytes)
+        else:
+            # Lightweight bundle: resolve external PDF
+            resolved_pdf = cls.find_matching_pdf(project_path, state_data, search_hint=source_pdf_hint)
+            if not resolved_pdf or not os.path.exists(resolved_pdf):
+                raise SourcePdfNotFoundError(
+                    f"Lightweight package requires source PDF '{state_data.get('source_original_name', 'document.pdf')}' "
+                    f"with SHA-256 ({state_data.get('pdf_sha256', '')[:12]}...), but it could not be located."
+                )
 
-        print(f"[PERF-DEBUG] Loaded project bundle in {time.time() - t0:.3f}s: {os.path.basename(project_path)}")
+            # Copy reference PDF to extracted location
+            import shutil
+            shutil.copy2(resolved_pdf, pdf_extracted_path)
+
+        print(f"[PERF-DEBUG] Loaded project in {time.time() - t0:.3f}s: {os.path.basename(project_path)}")
         return pdf_extracted_path, state_data, docling_stream
+
+    @classmethod
+    def find_matching_pdf(
+        cls,
+        bundle_path: str,
+        manifest: dict,
+        search_hint: str | None = None,
+        extra_search_dirs: list[str] | None = None
+    ) -> str | None:
+        """
+        Finds the matching original PDF for a .pdfeditlight bundle by testing candidate paths
+        and verifying SHA-256 hashes against manifest["pdf_sha256"].
+        """
+        target_sha = manifest.get("pdf_sha256", "").lower().strip()
+        orig_name = manifest.get("source_original_name", "")
+        src_pdf_field = manifest.get("source_pdf", "")
+
+        candidates = []
+
+        if search_hint:
+            if os.path.isfile(search_hint):
+                candidates.append(search_hint)
+            elif os.path.isdir(search_hint):
+                if orig_name: candidates.append(os.path.join(search_hint, orig_name))
+                if src_pdf_field and src_pdf_field != "document.pdf": candidates.append(os.path.join(search_hint, src_pdf_field))
+                for root, _, files in os.walk(search_hint):
+                    for f in files:
+                        if f.lower().endswith(".pdf"):
+                            candidates.append(os.path.join(root, f))
+
+        bundle_dir = os.path.dirname(os.path.abspath(bundle_path))
+        candidates.append(os.path.join(bundle_dir, orig_name))
+        candidates.append(os.path.join(bundle_dir, src_pdf_field))
+
+        # Check standard input directories relative to project root
+        proj_root = os.path.abspath(os.path.join(bundle_dir, ".."))
+        candidates.append(os.path.join(proj_root, "inputs", orig_name))
+        candidates.append(os.path.join(proj_root, "inputs", src_pdf_field))
+
+        if extra_search_dirs:
+            for ed in extra_search_dirs:
+                if os.path.exists(ed):
+                    candidates.append(os.path.join(ed, orig_name))
+                    for root, _, files in os.walk(ed):
+                        for f in files:
+                            if f.lower().endswith(".pdf"):
+                                candidates.append(os.path.join(root, f))
+
+        # Test exact candidate matches with SHA-256 verification
+        seen = set()
+        for cand in candidates:
+            if not cand or cand in seen or not os.path.isfile(cand):
+                continue
+            seen.add(cand)
+
+            if not target_sha:
+                # If manifest has no hash, match by exact filename
+                if os.path.basename(cand) in (orig_name, src_pdf_field):
+                    return os.path.abspath(cand)
+            else:
+                cand_sha = cls.compute_file_sha256(cand).lower()
+                if cand_sha == target_sha:
+                    return os.path.abspath(cand)
+
+        return None
+
+    @classmethod
+    def convert_light_to_full(
+        cls,
+        light_bundle_path: str,
+        output_full_bundle_path: str | None = None,
+        source_pdf_path: str | None = None,
+        search_dirs: list[str] | None = None,
+        password: str | None = None,
+        verify_checksum: bool = True
+    ) -> str:
+        """
+        Converts a lightweight .pdfeditlight bundle to a standalone, full-featured .pdfedit bundle.
+        """
+        state_data, docling_stream, existing_pdf = cls.load_project_payload(light_bundle_path, password=password)
+
+        if existing_pdf is not None:
+            # Already a full bundle
+            resolved_pdf_doc = pymupdf.open(stream=existing_pdf, filetype="pdf")
+        else:
+            resolved_pdf = source_pdf_path or cls.find_matching_pdf(light_bundle_path, state_data, extra_search_dirs=search_dirs)
+            if not resolved_pdf or not os.path.exists(resolved_pdf):
+                raise SourcePdfNotFoundError(
+                    f"Cannot convert '{os.path.basename(light_bundle_path)}': Source PDF "
+                    f"'{state_data.get('source_original_name')}' not found."
+                )
+
+            if verify_checksum and state_data.get("pdf_sha256"):
+                actual_sha = cls.compute_file_sha256(resolved_pdf).lower()
+                expected_sha = state_data["pdf_sha256"].lower()
+                if actual_sha != expected_sha:
+                    raise ChecksumMismatchError(
+                        f"Checksum mismatch for '{resolved_pdf}'. Expected {expected_sha[:12]}..., got {actual_sha[:12]}..."
+                    )
+
+            resolved_pdf_doc = pymupdf.open(resolved_pdf)
+
+        if not output_full_bundle_path:
+            p = Path(light_bundle_path)
+            output_full_bundle_path = str(p.with_name(p.stem.replace(".tmp", "") + ".pdfedit"))
+
+        state_data["is_lightweight"] = False
+        state_data["source_pdf"] = "document.pdf"
+        state_data["bundle_name"] = os.path.basename(output_full_bundle_path)
+
+        cls.save_project(
+            project_path=output_full_bundle_path,
+            doc=resolved_pdf_doc,
+            state_data=state_data,
+            docling_stream=docling_stream,
+            password=password,
+            lightweight=False
+        )
+
+        resolved_pdf_doc.close()
+        return output_full_bundle_path
+
+    @classmethod
+    def convert_full_to_light(
+        cls,
+        full_bundle_path: str,
+        output_light_bundle_path: str | None = None,
+        password: str | None = None
+    ) -> str:
+        """
+        Converts a full .pdfedit bundle to a lightweight .pdfeditlight bundle by stripping document.pdf.
+        """
+        state_data, docling_stream, pdf_bytes = cls.load_project_payload(full_bundle_path, password=password)
+
+        if pdf_bytes is None:
+            # Already lightweight
+            return full_bundle_path
+
+        doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+
+        if not output_light_bundle_path:
+            p = Path(full_bundle_path)
+            output_light_bundle_path = str(p.with_name(p.stem + ".pdfeditlight"))
+
+        cls.save_project(
+            project_path=output_light_bundle_path,
+            doc=doc,
+            state_data=state_data,
+            docling_stream=docling_stream,
+            password=password,
+            lightweight=True
+        )
+
+        doc.close()
+        return output_light_bundle_path
 
     @classmethod
     def repack_manifest_into_bundle(
@@ -437,7 +612,7 @@ class ProjectManager:
         password: str | None = None
     ) -> str:
         """
-        Updates or repacks an edited JSON manifest back into its linked .pdfedit package.
+        Updates or repacks an edited JSON manifest back into its linked .pdfedit or .pdfeditlight package.
         """
         with open(json_manifest_path, "r", encoding="utf-8") as f:
             manifest = json.load(f)
@@ -450,13 +625,14 @@ class ProjectManager:
             dest_bundle = os.path.join(os.path.dirname(json_manifest_path), dest_bundle)
 
         if not os.path.exists(dest_bundle):
-            raise FileNotFoundError(f"Target .pdfedit bundle not found: {dest_bundle}")
+            raise FileNotFoundError(f"Target bundle not found: {dest_bundle}")
 
         pdf_path, old_state, docling_stream = cls.load_project(dest_bundle, password=password)
         doc = pymupdf.open(pdf_path)
 
         manifest["version"] = cls.VERSION
         manifest["bundle_name"] = os.path.basename(dest_bundle)
+        is_light = manifest.get("is_lightweight", dest_bundle.lower().endswith(".pdfeditlight"))
 
         cls.save_project(
             project_path=dest_bundle,
@@ -464,7 +640,8 @@ class ProjectManager:
             state_data=manifest,
             docling_stream=docling_stream,
             password=password,
-            include_expanded_reviews=False
+            include_expanded_reviews=False,
+            lightweight=is_light
         )
         doc.close()
         return dest_bundle

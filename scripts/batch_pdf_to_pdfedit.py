@@ -1,14 +1,12 @@
 # E:/pdf_cloud_pipeline/scripts/batch_pdf_to_pdfedit.py
 
 """
-Universal Batch PDF to .pdfedit Processor
+Universal Batch PDF to .pdfedit & .pdfeditlight Processor
 Designed for Google Colab, GitHub Actions, and Local High-Performance Pipelines.
 
-Converts batches of raw PDFs into unified, self-contained, and GUI-compatible
-`.pdfedit` workspace bundles containing:
-  - document.pdf
-  - project.json (with deterministic two-way bundle linking)
-  - docling_stream.json (frozen OCR/digital reading stream)
+Converts batches of raw PDFs into BOTH:
+  1. `.pdfedit` (Full bundle: contains document.pdf + project.json + docling_stream.json)
+  2. `.pdfeditlight` (Lean bundle: contains project.json + docling_stream.json, references original PDF)
 """
 
 import os
@@ -543,24 +541,19 @@ def save_progress_tracker(output_dir: str, tracker_data: dict):
 
 
 def is_bundle_complete_and_valid(bundle_path: str, password: str | None = None) -> bool:
-    """Verifies that an existing .pdfedit bundle is intact, uncorrupted, and decryptable."""
+    """Verifies that an existing bundle is intact, uncorrupted, and decryptable."""
     if not os.path.exists(bundle_path) or os.path.getsize(bundle_path) < 100:
         return False
     try:
-        pdf_path, state, _ = ProjectManager.load_project(bundle_path, password=password)
-        if os.path.exists(pdf_path) and state.get("elements") is not None:
-            temp_dir = os.path.dirname(pdf_path)
-            import shutil
-            shutil.rmtree(temp_dir, ignore_errors=True)
-            return True
+        state, _, _ = ProjectManager.load_project_payload(bundle_path, password=password)
+        return state.get("elements") is not None
     except Exception as e:
         print(f"[!] Validation check failed for {os.path.basename(bundle_path)}: {e}")
         return False
-    return False
 
 
 # ============================================================
-# SINGLE PDF PROCESSOR TO .PDFEDIT
+# SINGLE PDF PROCESSOR TO BOTH .PDFEDIT & .PDFEDITLIGHT
 # ============================================================
 
 def process_single_pdf_to_pdfedit(
@@ -568,27 +561,34 @@ def process_single_pdf_to_pdfedit(
     output_dir: str,
     converter=None,
     password: str | None = None,
-    resume: bool = True
-) -> tuple[str, bool]:
+    resume: bool = True,
+    create_both: bool = True
+) -> tuple[list[str], bool]:
     """
-    Converts one PDF into a self-contained .pdfedit package with atomic write safety.
-    Returns: (output_bundle_path, was_skipped)
+    Converts one PDF into BOTH .pdfedit and .pdfeditlight packages in a single pass with atomic write safety.
+    Returns: ([output_bundle_paths], was_skipped)
     """
     start_time = time.time()
     pdf_path = os.path.abspath(source_pdf_path)
     base_name = os.path.splitext(os.path.basename(pdf_path))[0]
-    out_bundle_name = f"{base_name}.pdfedit"
-    out_bundle_path = os.path.join(output_dir, out_bundle_name)
-    tmp_bundle_path = os.path.join(output_dir, f"{base_name}.tmp.pdfedit")
 
-    # 1. Resumability Check: Verify if already processed and uncorrupted
-    if resume and is_bundle_complete_and_valid(out_bundle_path, password=password):
-        print(f"⏩ [Skip/Resume] Valid bundle already exists: {out_bundle_name}")
-        return out_bundle_path, True
+    out_full_path = os.path.join(output_dir, f"{base_name}.pdfedit")
+    out_light_path = os.path.join(output_dir, f"{base_name}.pdfeditlight")
+
+    tmp_full_path = os.path.join(output_dir, f"{base_name}.tmp.pdfedit")
+    tmp_light_path = os.path.join(output_dir, f"{base_name}.tmp.pdfeditlight")
+
+    # 1. Resumability Check: Verify if both bundles already exist and are intact
+    full_exists = is_bundle_complete_and_valid(out_full_path, password=password)
+    light_exists = is_bundle_complete_and_valid(out_light_path, password=password)
+
+    if resume and full_exists and light_exists:
+        print(f"⏩ [Skip/Resume] Valid .pdfedit & .pdfeditlight already exist for: {base_name}")
+        return [out_full_path, out_light_path], True
 
     print("\n" + "=" * 75)
     print(f"📄 Processing: {os.path.basename(pdf_path)}")
-    print(f"📦 Target Package: {out_bundle_name}")
+    print(f"📦 Creating: {os.path.basename(out_full_path)} + {os.path.basename(out_light_path)}")
     print("=" * 75)
 
     pdf = pymupdf.open(pdf_path)
@@ -822,7 +822,7 @@ def process_single_pdf_to_pdfedit(
             page_rects_map[p_num - 1].append([comb_box["x1"], comb_box["y1"], comb_box["x2"], comb_box["y2"]])
             page_metas_map[p_num - 1].append({"id": elem_id, "type": "table"})
 
-    # 6. Package Directly into .pdfedit Container (Zero Loose Stray Files)
+    # 6. Package State Definitions
     serialized_guidelines = {}
     for p_idx, r_list in page_rects_map.items():
         if r_list:
@@ -833,18 +833,13 @@ def process_single_pdf_to_pdfedit(
                 "history": [["add_rect", r] for r in r_list]
             }
 
-    # Deterministic Two-Way ID Linking
     with open(pdf_path, "rb") as f_hash:
         pdf_sha = hashlib.sha256(f_hash.read()).hexdigest()
-    bundle_id = hashlib.md5(f"{pdf_sha}_{out_bundle_name}".encode()).hexdigest()
 
-    manifest_data = {
+    base_manifest = {
         "version": "2.0",
-        "bundle_id": bundle_id,
-        "bundle_name": out_bundle_name,
         "source_original_name": os.path.basename(pdf_path),
         "pdf_sha256": pdf_sha,
-        "source_pdf": "document.pdf",
         "coordinate_system": {"origin": "top-left", "unit": "pt"},
         "font_profile": font_profile,
         "elements": elements,
@@ -854,42 +849,83 @@ def process_single_pdf_to_pdfedit(
         "page_guidelines": serialized_guidelines
     }
 
-    # Save first to atomic .tmp path
-    if os.path.exists(tmp_bundle_path):
-        try: os.remove(tmp_bundle_path)
+    # ========================================================
+    # A. SAVE FULL .PDFEDIT PACKAGE (WITH PDF)
+    # ========================================================
+    manifest_full = dict(base_manifest)
+    manifest_full["bundle_name"] = os.path.basename(out_full_path)
+    manifest_full["bundle_id"] = hashlib.md5(f"{pdf_sha}_{os.path.basename(out_full_path)}".encode()).hexdigest()
+    manifest_full["source_pdf"] = "document.pdf"
+
+    if os.path.exists(tmp_full_path):
+        try: os.remove(tmp_full_path)
         except Exception: pass
 
     ProjectManager.save_project(
-        project_path=tmp_bundle_path,
+        project_path=tmp_full_path,
         doc=pdf,
-        state_data=manifest_data,
+        state_data=manifest_full,
         docling_stream=docling_text_stream,
         password=password,
-        include_expanded_reviews=False
+        include_expanded_reviews=False,
+        lightweight=False
     )
 
-    pdf.close()
+    if not is_bundle_complete_and_valid(tmp_full_path, password=password):
+        if os.path.exists(tmp_full_path):
+            os.remove(tmp_full_path)
+        raise RuntimeError(f"Package verification failed for {os.path.basename(out_full_path)}")
 
-    # Verify written package before committing atomic rename
-    if not is_bundle_complete_and_valid(tmp_bundle_path, password=password):
-        if os.path.exists(tmp_bundle_path):
-            os.remove(tmp_bundle_path)
-        raise RuntimeError(f"Package verification failed for {out_bundle_name}")
-
-    try:
-        os.replace(tmp_bundle_path, out_bundle_path)
+    try: os.replace(tmp_full_path, out_full_path)
     except Exception:
-        if os.path.exists(out_bundle_path):
-            os.remove(out_bundle_path)
-        os.rename(tmp_bundle_path, out_bundle_path)
+        if os.path.exists(out_full_path): os.remove(out_full_path)
+        os.rename(tmp_full_path, out_full_path)
 
+    # ========================================================
+    # B. SAVE LEAN .PDFEDITLIGHT PACKAGE (WITHOUT PDF)
+    # ========================================================
+    manifest_light = dict(base_manifest)
+    manifest_light["bundle_name"] = os.path.basename(out_light_path)
+    manifest_light["bundle_id"] = hashlib.md5(f"{pdf_sha}_{os.path.basename(out_light_path)}".encode()).hexdigest()
+    manifest_light["source_pdf"] = os.path.basename(pdf_path)
+
+    if os.path.exists(tmp_light_path):
+        try: os.remove(tmp_light_path)
+        except Exception: pass
+
+    ProjectManager.save_project(
+        project_path=tmp_light_path,
+        doc=pdf,
+        state_data=manifest_light,
+        docling_stream=docling_text_stream,
+        password=password,
+        include_expanded_reviews=False,
+        lightweight=True
+    )
+
+    if not is_bundle_complete_and_valid(tmp_light_path, password=password):
+        if os.path.exists(tmp_light_path):
+            os.remove(tmp_light_path)
+        raise RuntimeError(f"Package verification failed for {os.path.basename(out_light_path)}")
+
+    try: os.replace(tmp_light_path, out_light_path)
+    except Exception:
+        if os.path.exists(out_light_path): os.remove(out_light_path)
+        os.rename(tmp_light_path, out_light_path)
+
+    pdf.close()
     gc.collect()
 
     elapsed = time.time() - start_time
-    print(f"[✓] Successfully generated ({elapsed:.1f}s): {out_bundle_name}")
-    print(f"    • Bundle ID: {bundle_id}")
-    print(f"    • Elements:  {len(final_images)} images, {len(final_tables)} tables, {len(docling_text_stream)} text nodes")
-    return out_bundle_path, False
+    full_sz = os.path.getsize(out_full_path) / (1024 * 1024)
+    light_sz = os.path.getsize(out_light_path) / 1024
+
+    print(f"[✓] Generated in {elapsed:.1f}s:")
+    print(f"    • Full Bundle:  {os.path.basename(out_full_path)} ({full_sz:.2f} MB)")
+    print(f"    • Lean Package: {os.path.basename(out_light_path)} ({light_sz:.1f} KB)")
+    print(f"    • Elements:     {len(final_images)} images, {len(final_tables)} tables, {len(docling_text_stream)} text nodes")
+
+    return [out_full_path, out_light_path], False
 
 
 # ============================================================
@@ -935,7 +971,7 @@ def load_input_pdf_list(args_inputs: list[str], list_file_path: str | None = Non
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Universal Batch PDF to .pdfedit Converter with Resumable Tracking (Colab, GitHub Actions, Local)."
+        description="Universal Batch PDF to .pdfedit and .pdfeditlight Converter with Resumable Tracking (Colab, GitHub Actions, Local)."
     )
     parser.add_argument(
         "inputs",
@@ -952,7 +988,7 @@ def main():
     parser.add_argument(
         "-o", "--output-dir",
         default="./output_bundles",
-        help="Destination directory for generated .pdfedit packages (default: ./output_bundles)."
+        help="Destination directory for generated packages (default: ./output_bundles)."
     )
     parser.add_argument(
         "-p", "--password",
@@ -973,7 +1009,7 @@ def main():
     parser.add_argument(
         "--repack-manifest",
         default=None,
-        help="Repack an edited project.json back into its linked .pdfedit package."
+        help="Repack an edited project.json back into its linked package."
     )
     parser.add_argument(
         "--no-ocr",
@@ -993,7 +1029,7 @@ def main():
 
     # Repack Mode
     if args.repack_manifest:
-        print(f"[*] Repacking manifest into .pdfedit: {args.repack_manifest}")
+        print(f"[*] Repacking manifest into package: {args.repack_manifest}")
         target = ProjectManager.repack_manifest_into_bundle(args.repack_manifest, password=active_password)
         print(f"[✓] Repack completed successfully -> {target}")
         sys.exit(0)
@@ -1008,7 +1044,7 @@ def main():
     tracker = load_progress_tracker(args.output_dir)
 
     print("=" * 75)
-    print("🚀 Batch PDF to .pdfedit Converter (Resumable Pipeline)")
+    print("🚀 Batch PDF to Dual Package Pipeline (.pdfedit + .pdfeditlight)")
     print(f"   • Total PDFs queued:     {len(pdf_files)}")
     print(f"   • Output Directory:      {os.path.abspath(args.output_dir)}")
     print(f"   • Resumable Checkpoints: {'Enabled (skip valid)' if not args.force else 'Disabled (force overwrite)'}")
@@ -1039,12 +1075,13 @@ def main():
         print(f"\n[{idx}/{len(pdf_files)}] Checking '{rel_id}'...")
 
         try:
-            bundle_path, was_skipped = process_single_pdf_to_pdfedit(
+            bundle_paths, was_skipped = process_single_pdf_to_pdfedit(
                 source_pdf_path=pdf_p,
                 output_dir=args.output_dir,
                 converter=converter,
                 password=active_password,
-                resume=(not args.force)
+                resume=(not args.force),
+                create_both=True
             )
 
             if was_skipped:
@@ -1054,22 +1091,24 @@ def main():
 
             # Update progress tracker
             tracker.setdefault("items", {})[rel_id] = {
-                "bundle_name": os.path.basename(bundle_path),
+                "bundle_name": os.path.basename(bundle_paths[0]),
+                "light_bundle_name": os.path.basename(bundle_paths[1]),
                 "source_path": pdf_p,
                 "status": "completed",
                 "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             }
             save_progress_tracker(args.output_dir, tracker)
 
-            # Auto-sync to GitHub repository if enabled
+            # Auto-sync both bundles to GitHub repository if enabled
             if args.git_push and not was_skipped:
                 manifest_file = os.path.join(args.output_dir, PROGRESS_MANIFEST_NAME)
+                files_to_push = bundle_paths + [manifest_file]
                 synced = git_commit_and_push(
-                    file_paths=[bundle_path, manifest_file],
-                    commit_message=f"feat(bundles): add {os.path.basename(bundle_path)} [skip ci]"
+                    file_paths=files_to_push,
+                    commit_message=f"feat(bundles): add {os.path.basename(bundle_paths[0])} & light [skip ci]"
                 )
                 if synced:
-                    print(f"    ☁️ Synced to GitHub: {os.path.basename(bundle_path)}")
+                    print(f"    ☁️ Synced to GitHub: {os.path.basename(bundle_paths[0])} & .pdfeditlight")
 
         except Exception as e:
             failed_count += 1
