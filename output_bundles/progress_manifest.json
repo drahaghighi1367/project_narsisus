@@ -1,7 +1,7 @@
 {
   "version": "2.0",
-  "last_updated": "2026-08-28T08:07:52Z",
-  "completed_count": 11,
+  "last_updated": "2026-08-28T08:08:05Z",
+  "completed_count": 12,
   "items": {
     "01_1 The Practice of Medicine.pdf": {
       "bundle_name": "01_1 The Practice of Medicine.pdfedit",
@@ -68,6 +68,12 @@
       "source_path": "inputs/11_11 Racial and Ethnic Disparities in Health Care.pdf",
       "status": "completed",
       "completed_at": "2026-08-28T08:07:52Z"
+    },
+    "12_12 Ethical Issues in Clinical Medicine.pdf": {
+      "bundle_name": "12_12 Ethical Issues in Clinical Medicine.pdfedit",
+      "source_path": "inputs/12_12 Ethical Issues in Clinical Medicine.pdf",
+      "status": "completed",
+      "completed_at": "2026-08-28T08:08:05Z"
     }
   }
 }
