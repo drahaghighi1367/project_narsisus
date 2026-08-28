@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "last_updated": "2026-08-28T09:00:50Z",
+  "last_updated": "2026-08-28T09:01:02Z",
   "completed_count": 14,
   "items": {
     "01_1 The Practice of Medicine.pdf": {
@@ -40,9 +40,10 @@
     },
     "07_7 The Safety and Quality of Health Care.pdf": {
       "bundle_name": "07_7 The Safety and Quality of Health Care.pdfedit",
+      "light_bundle_name": "07_7 The Safety and Quality of Health Care.pdfeditlight",
       "source_path": "inputs/07_7 The Safety and Quality of Health Care.pdf",
       "status": "completed",
-      "completed_at": "2026-08-28T08:04:59Z"
+      "completed_at": "2026-08-28T09:01:02Z"
     },
     "08_8 The Value of the Physical Examination in Modern Medicine.pdf": {
       "bundle_name": "08_8 The Value of the Physical Examination in Modern Medicine.pdfedit",
