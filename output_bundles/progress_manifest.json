@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "last_updated": "2026-08-28T08:58:18Z",
+  "last_updated": "2026-08-28T08:58:53Z",
   "completed_count": 14,
   "items": {
     "01_1 The Practice of Medicine.pdf": {
@@ -19,9 +19,10 @@
     },
     "03_3 Vaccine Opposition and Hesitancy.pdf": {
       "bundle_name": "03_3 Vaccine Opposition and Hesitancy.pdfedit",
+      "light_bundle_name": "03_3 Vaccine Opposition and Hesitancy.pdfeditlight",
       "source_path": "inputs/03_3 Vaccine Opposition and Hesitancy.pdf",
       "status": "completed",
-      "completed_at": "2026-08-28T08:27:10Z"
+      "completed_at": "2026-08-28T08:58:53Z"
     },
     "04_4 Decision-Making in Clinical Medicine.pdf": {
       "bundle_name": "04_4 Decision-Making in Clinical Medicine.pdfedit",
