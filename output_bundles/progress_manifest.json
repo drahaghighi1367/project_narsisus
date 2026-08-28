@@ -1,13 +1,14 @@
 {
   "version": "2.0",
-  "last_updated": "2026-08-28T08:28:02Z",
+  "last_updated": "2026-08-28T08:57:51Z",
   "completed_count": 14,
   "items": {
     "01_1 The Practice of Medicine.pdf": {
       "bundle_name": "01_1 The Practice of Medicine.pdfedit",
+      "light_bundle_name": "01_1 The Practice of Medicine.pdfeditlight",
       "source_path": "inputs/01_1 The Practice of Medicine.pdf",
       "status": "completed",
-      "completed_at": "2026-08-28T08:27:10Z"
+      "completed_at": "2026-08-28T08:57:51Z"
     },
     "02_2 Promoting Good Health.pdf": {
       "bundle_name": "02_2 Promoting Good Health.pdfedit",
