@@ -8,7 +8,12 @@ import hashlib
 import hmac
 import struct
 import pymupdf
-from PyQt6.QtCore import QPoint
+
+try:
+    from PyQt6.QtCore import QPoint
+except ImportError:
+    QPoint = None
+
 from core.models import BoundingBox, PdfBoxElement
 
 
@@ -168,7 +173,10 @@ class ProjectManager:
             elif action_type == "add_rects":
                 serialized.append([action_type, [cls.serialize_rect(r) for r in val]])
             elif action_type == "point":
-                serialized.append([action_type, [val.x(), val.y()]])
+                if hasattr(val, "x") and hasattr(val, "y"):
+                    serialized.append([action_type, [val.x(), val.y()]])
+                elif isinstance(val, (list, tuple)):
+                    serialized.append([action_type, [val[0], val[1]]])
         return serialized
 
     @classmethod
@@ -186,7 +194,10 @@ class ProjectManager:
             elif action_type == "add_rects":
                 deserialized.append((action_type, [cls.deserialize_rect(r) for r in val]))
             elif action_type == "point":
-                deserialized.append((action_type, QPoint(int(val[0]), int(val[1]))))
+                if QPoint is not None:
+                    deserialized.append((action_type, QPoint(int(val[0]), int(val[1]))))
+                else:
+                    deserialized.append((action_type, (int(val[0]), int(val[1]))))
         return deserialized
 
     @classmethod
