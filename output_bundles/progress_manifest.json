@@ -1,0 +1,13 @@
+{
+  "version": "2.0",
+  "last_updated": "2026-08-28T08:00:59Z",
+  "completed_count": 1,
+  "items": {
+    "01_1 The Practice of Medicine.pdf": {
+      "bundle_name": "01_1 The Practice of Medicine.pdfedit",
+      "source_path": "inputs/01_1 The Practice of Medicine.pdf",
+      "status": "completed",
+      "completed_at": "2026-08-28T08:00:59Z"
+    }
+  }
+}
