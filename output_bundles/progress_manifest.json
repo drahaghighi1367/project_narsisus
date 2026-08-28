@@ -1,7 +1,7 @@
 {
   "version": "2.0",
-  "last_updated": "2026-08-28T05:38:03Z",
-  "completed_count": 12,
+  "last_updated": "2026-08-28T05:38:18Z",
+  "completed_count": 13,
   "items": {
     "longman1.pdf": {
       "bundle_name": "longman1.pdfedit",
@@ -74,6 +74,12 @@
       "source_path": "inputs/11_11 Racial and Ethnic Disparities in Health Care.pdf",
       "status": "completed",
       "completed_at": "2026-08-28T05:38:03Z"
+    },
+    "12_12 Ethical Issues in Clinical Medicine.pdf": {
+      "bundle_name": "12_12 Ethical Issues in Clinical Medicine.pdfedit",
+      "source_path": "inputs/12_12 Ethical Issues in Clinical Medicine.pdf",
+      "status": "completed",
+      "completed_at": "2026-08-28T05:38:18Z"
     }
   }
 }
