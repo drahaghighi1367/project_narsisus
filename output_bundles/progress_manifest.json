@@ -1,13 +1,19 @@
 {
   "version": "2.0",
-  "last_updated": "2026-08-28T05:10:33Z",
-  "completed_count": 1,
+  "last_updated": "2026-08-28T05:29:25Z",
+  "completed_count": 2,
   "items": {
     "longman1.pdf": {
       "bundle_name": "longman1.pdfedit",
       "source_path": "inputs/longman1.pdf",
       "status": "completed",
       "completed_at": "2026-08-28T05:10:33Z"
+    },
+    "01_1 The Practice of Medicine.pdf": {
+      "bundle_name": "01_1 The Practice of Medicine.pdfedit",
+      "source_path": "inputs/01_1 The Practice of Medicine.pdf",
+      "status": "completed",
+      "completed_at": "2026-08-28T05:29:25Z"
     }
   }
 }
