@@ -35,25 +35,19 @@ from core.project_manager import ProjectManager
 def git_commit_and_push(file_paths: list[str], commit_message: str) -> bool:
     """Safely stages, commits, and pushes files to the current branch with rebase retry."""
     try:
-        # Check if inside a git work tree
         res = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True)
         if res.returncode != 0:
             return False
 
-        # Stage specific files
         for p in file_paths:
             if os.path.exists(p):
                 subprocess.run(["git", "add", p], check=True, capture_output=True)
 
-        # Check if there are changes staged
         diff = subprocess.run(["git", "diff", "--staged", "--quiet"], capture_output=True)
         if diff.returncode == 0:
-            return True  # Nothing to commit
+            return True
 
-        # Commit
         subprocess.run(["git", "commit", "-m", commit_message], check=True, capture_output=True)
-
-        # Pull rebase and push (handles concurrent pushes safely)
         subprocess.run(["git", "pull", "--rebase"], capture_output=True)
         push_res = subprocess.run(["git", "push"], capture_output=True, text=True)
         return push_res.returncode == 0
@@ -67,8 +61,9 @@ def git_commit_and_push(file_paths: list[str], commit_message: str) -> bool:
 # ============================================================
 
 CONFIG = {
-    "iou_overlap_threshold": 0.05,
+    "iou_overlap_threshold": 0.02,
     "enclosure_threshold": 0.05,
+    "gutter_tolerance": 6.0,  # Merges sub-panels / borders separated by small gaps
     "figure_keywords": ["FIG", "FIGURE", "EXHIBIT", "PHOTO", "IMAGE", "PLATE", "CHART", "DIAGRAM"],
     "table_keywords": ["TABLE", "TAB", "EXHIBIT", "SCHEDULE"],
     "footnote_keywords": [
@@ -130,29 +125,51 @@ def to_topleft(bbox, p_height: float) -> tuple[float, float, float, float]:
     return (float(bbox.l), p_height - float(bbox.t), float(bbox.r), p_height - float(bbox.b))
 
 
-def bbox_iou(b1, b2) -> tuple[float, float]:
-    x1, y1 = max(b1[0], b2[0]), max(b1[1], b2[1])
-    x2, y2 = min(b1[2], b2[2]), min(b1[3], b2[3])
-
-    if x2 <= x1 or y2 <= y1:
-        return 0.0, 0.0
-
-    inter_area = (x2 - x1) * (y2 - y1)
-    area1 = (b1[2] - b1[0]) * (b1[3] - b1[1])
-    area2 = (b2[2] - b2[0]) * (b2[3] - b2[1])
-    union_area = area1 + area2 - inter_area
-
-    iou = inter_area / union_area if union_area > 0 else 0.0
-    min_area = min(area1, area2)
-    enclosure = inter_area / min_area if min_area > 0 else 0.0
-    return iou, enclosure
-
-
-def merge_candidates(candidates: list[dict], iou_thresh: float = 0.05, enc_thresh: float = 0.05) -> list[dict]:
+def do_rects_overlap_or_touch(b1: tuple | list | dict, b2: tuple | list | dict, gutter: float = 6.0) -> bool:
     """
-    Iteratively merges all bounding boxes on each page that overlap, touch,
-    or where one is contained/confined within another (e.g. sub-images inside a composite image),
-    producing the smallest enclosing bounding box covering all overlapping/confined components.
+    Evaluates whether two rectangles overlap, are nested within one another,
+    or touch across a small separator gutter.
+    """
+    if isinstance(b1, dict):
+        x1_a, y1_a, x2_a, y2_a = float(b1["x1"]), float(b1["y1"]), float(b1["x2"]), float(b1["y2"])
+    else:
+        x1_a, y1_a, x2_a, y2_a = float(b1[0]), float(b1[1]), float(b1[2]), float(b1[3])
+
+    if isinstance(b2, dict):
+        x1_b, y1_b, x2_b, y2_b = float(b2["x1"]), float(b2["y1"]), float(b2["x2"]), float(b2["y2"])
+    else:
+        x1_b, y1_b, x2_b, y2_b = float(b2[0]), float(b2[1]), float(b2[2]), float(b2[3])
+
+    inter_x1 = max(x1_a, x1_b)
+    inter_y1 = max(y1_a, y1_b)
+    inter_x2 = min(x2_a, x2_b)
+    inter_y2 = min(y2_a, y2_b)
+
+    # Direct overlap or containment check
+    if inter_x2 > inter_x1 and inter_y2 > inter_y1:
+        inter_area = (inter_x2 - inter_x1) * (inter_y2 - inter_y1)
+        area_a = max(1.0, (x2_a - x1_a) * (y2_a - y1_a))
+        area_b = max(1.0, (x2_b - x1_b) * (y2_b - y1_b))
+        min_area = min(area_a, area_b)
+        union_area = area_a + area_b - inter_area
+        if (inter_area / min_area) > 0.05 or (inter_area / union_area) > 0.02:
+            return True
+
+    # Gutter-distance proximity check for composite panels
+    h_overlap = min(x2_a, x2_b) - max(x1_a, x1_b)
+    v_overlap = min(y2_a, y2_b) - max(y1_a, y1_b)
+
+    if h_overlap > 12.0 and (abs(y1_a - y2_b) <= gutter or abs(y1_b - y2_a) <= gutter):
+        return True
+    if v_overlap > 12.0 and (abs(x1_a - x2_b) <= gutter or abs(x1_b - x2_a) <= gutter):
+        return True
+
+    return False
+
+
+def merge_candidate_rectangles(candidates: list[dict], gutter_tolerance: float = 6.0) -> list[dict]:
+    """
+    Iteratively merges raw candidates on each page using transitive closure.
     """
     if not candidates:
         return []
@@ -163,65 +180,226 @@ def merge_candidates(candidates: list[dict], iou_thresh: float = 0.05, enc_thres
         srcs = list(cand["sources"]) if isinstance(cand.get("sources"), (list, tuple)) else [cand.get("source", "detected")]
         by_page.setdefault(p, []).append({
             "page": p,
-            "bbox": cand["bbox"],
+            "bbox": tuple(float(x) for x in cand["bbox"]),
             "sources": srcs
         })
 
     all_merged = []
 
     for p, items in by_page.items():
+        active = list(items)
         changed = True
+
         while changed:
             changed = False
-            new_items = []
-            visited = [False] * len(items)
+            new_active = []
+            used = [False] * len(active)
 
-            for i in range(len(items)):
-                if visited[i]:
+            for i in range(len(active)):
+                if used[i]:
                     continue
-                cur = items[i]
-                cur_bbox = list(cur["bbox"])
-                cur_sources = list(cur["sources"])
 
-                for j in range(i + 1, len(items)):
-                    if visited[j]:
+                cur_box = list(active[i]["bbox"])
+                cur_sources = list(active[i]["sources"])
+
+                for j in range(i + 1, len(active)):
+                    if used[j]:
                         continue
-                    other = items[j]
-                    other_bbox = other["bbox"]
-                    iou, enc = bbox_iou(cur_bbox, other_bbox)
 
-                    # Direct check for intersection, containment, or IoU overlap
-                    inter_x1 = max(cur_bbox[0], other_bbox[0])
-                    inter_y1 = max(cur_bbox[1], other_bbox[1])
-                    inter_x2 = min(cur_bbox[2], other_bbox[2])
-                    inter_y2 = min(cur_bbox[3], other_bbox[3])
-                    has_inter = (inter_x2 > inter_x1 and inter_y2 > inter_y1)
+                    other_box = active[j]["bbox"]
 
-                    if has_inter or iou > iou_thresh or enc > enc_thresh:
-                        cur_bbox = [
-                            min(cur_bbox[0], other_bbox[0]),
-                            min(cur_bbox[1], other_bbox[1]),
-                            max(cur_bbox[2], other_bbox[2]),
-                            max(cur_bbox[3], other_bbox[3])
-                        ]
-                        for s in other.get("sources", []):
+                    if do_rects_overlap_or_touch(cur_box, other_box, gutter=gutter_tolerance):
+                        cur_box[0] = min(cur_box[0], other_box[0])
+                        cur_box[1] = min(cur_box[1], other_box[1])
+                        cur_box[2] = max(cur_box[2], other_box[2])
+                        cur_box[3] = max(cur_box[3], other_box[3])
+
+                        for s in active[j]["sources"]:
                             if s not in cur_sources:
                                 cur_sources.append(s)
-                        visited[j] = True
+
+                        used[j] = True
                         changed = True
 
-                new_items.append({
+                new_active.append({
                     "page": p,
-                    "bbox": tuple(cur_bbox),
+                    "bbox": tuple(cur_box),
                     "sources": cur_sources
                 })
-                visited[i] = True
+                used[i] = True
 
-            items = new_items
+            active = new_active
 
-        all_merged.extend(items)
+        all_merged.extend(active)
 
     return all_merged
+
+
+def consolidate_overlapping_elements(elements: list[dict], gutter_tolerance: float = 6.0) -> list[dict]:
+    """
+    Universal Cross-Type Overlap Consolidation:
+    Groups overlapping or touching elements on each page into single bounding boxes.
+
+    Type Resolution Rules:
+      - If all overlapping items are tables  -> Resolved type is "table"
+      - If all overlapping items are images  -> Resolved type is "image"
+      - If some are tables and some are images -> Resolved type is "image"
+    """
+    if not elements:
+        return []
+
+    by_page: dict[int, list[dict]] = {}
+    for elem in elements:
+        by_page.setdefault(elem["page"], []).append(elem)
+
+    consolidated_all = []
+
+    for p_num, items in by_page.items():
+        n = len(items)
+        if n <= 1:
+            consolidated_all.extend(items)
+            continue
+
+        # Build adjacency graph based on combined bounding boxes
+        adj = {i: [] for i in range(n)}
+        for i in range(n):
+            b1 = items[i]["combined_bbox"]
+            for j in range(i + 1, n):
+                b2 = items[j]["combined_bbox"]
+                if do_rects_overlap_or_touch(b1, b2, gutter=gutter_tolerance):
+                    adj[i].append(j)
+                    adj[j].append(i)
+
+        # Find connected components (transitive clusters)
+        visited = set()
+        for i in range(n):
+            if i in visited:
+                continue
+
+            cluster_indices = []
+            queue = [i]
+            visited.add(i)
+
+            while queue:
+                curr = queue.pop(0)
+                cluster_indices.append(curr)
+                for neighbor in adj[curr]:
+                    if neighbor not in visited:
+                        visited.add(neighbor)
+                        queue.append(neighbor)
+
+            cluster_elements = [items[idx] for idx in cluster_indices]
+
+            if len(cluster_elements) == 1:
+                consolidated_all.append(cluster_elements[0])
+                continue
+
+            # Multi-element cluster: compute bounding union
+            min_c_x1 = min(float(e["combined_bbox"]["x1"]) for e in cluster_elements)
+            min_c_y1 = min(float(e["combined_bbox"]["y1"]) for e in cluster_elements)
+            max_c_x2 = max(float(e["combined_bbox"]["x2"]) for e in cluster_elements)
+            max_c_y2 = max(float(e["combined_bbox"]["y2"]) for e in cluster_elements)
+
+            raw_boxes = [e["raw_bbox"] for e in cluster_elements if e.get("raw_bbox")]
+            if raw_boxes:
+                min_r_x1 = min(float(b["x1"]) for b in raw_boxes)
+                min_r_y1 = min(float(b["y1"]) for b in raw_boxes)
+                max_r_x2 = max(float(b["x2"]) for b in raw_boxes)
+                max_r_y2 = max(float(b["y2"]) for b in raw_boxes)
+                merged_raw_bbox = {
+                    "x1": round(min_r_x1, 2), "y1": round(min_r_y1, 2),
+                    "x2": round(max_r_x2, 2), "y2": round(max_r_y2, 2)
+                }
+            else:
+                merged_raw_bbox = {
+                    "x1": round(min_c_x1, 2), "y1": round(min_c_y1, 2),
+                    "x2": round(max_c_x2, 2), "y2": round(max_c_y2, 2)
+                }
+
+            # Type resolution:
+            # If all are table -> 'table'
+            # If all are image -> 'image'
+            # If mixed (table + image) -> 'image'
+            distinct_types = {e.get("type", "generic") for e in cluster_elements}
+            if distinct_types == {"table"}:
+                resolved_type = "table"
+            elif distinct_types == {"image"}:
+                resolved_type = "image"
+            elif "table" in distinct_types and "image" in distinct_types:
+                resolved_type = "image"
+            elif "image" in distinct_types:
+                resolved_type = "image"
+            elif "table" in distinct_types:
+                resolved_type = "table"
+            else:
+                resolved_type = "generic"
+
+            # Merge captions / annotations
+            merged_captions = [e["caption"] for e in cluster_elements if e.get("caption")]
+            merged_top_caps = [e["top_caption"] for e in cluster_elements if e.get("top_caption")]
+            merged_notes = [e["bottom_notes"] for e in cluster_elements if e.get("bottom_notes")]
+
+            final_caption = merged_captions[0] if merged_captions else None
+            final_top_cap = merged_top_caps[0] if merged_top_caps else None
+            final_bottom_notes = merged_notes[0] if merged_notes else None
+
+            # If resolved to image and we had table headers/notes, preserve them inside caption
+            if resolved_type == "image":
+                if not final_caption:
+                    if final_top_cap:
+                        final_caption = final_top_cap
+                    elif final_bottom_notes:
+                        final_caption = final_bottom_notes
+                final_top_cap = None
+                final_bottom_notes = None
+
+            # Merge all detection sources
+            merged_sources = []
+            for e in cluster_elements:
+                for s in e.get("detection_sources", []):
+                    if s not in merged_sources:
+                        merged_sources.append(s)
+
+            consolidated_all.append({
+                "id": "",  # Will be re-indexed cleanly below
+                "type": resolved_type,
+                "page": p_num,
+                "combined_bbox": {
+                    "x1": round(min_c_x1, 2), "y1": round(min_c_y1, 2),
+                    "x2": round(max_c_x2, 2), "y2": round(max_c_y2, 2)
+                },
+                "raw_bbox": merged_raw_bbox,
+                "caption": final_caption,
+                "top_caption": final_top_cap,
+                "bottom_notes": final_bottom_notes,
+                "detection_sources": merged_sources
+            })
+
+    # Sort elements in natural reading order (page asc, y1 asc, x1 asc)
+    consolidated_all.sort(key=lambda e: (
+        int(e["page"]),
+        float(e["combined_bbox"]["y1"]),
+        float(e["combined_bbox"]["x1"])
+    ))
+
+    # Sequential re-indexing: img_1, img_2, tab_1, tab_2
+    img_counter = 1
+    tab_counter = 1
+    gen_counter = 1
+
+    for elem in consolidated_all:
+        t = elem["type"]
+        if t == "image":
+            elem["id"] = f"img_{img_counter}"
+            img_counter += 1
+        elif t == "table":
+            elem["id"] = f"tab_{tab_counter}"
+            tab_counter += 1
+        else:
+            elem["id"] = f"box_{elem['page']}_{gen_counter}"
+            gen_counter += 1
+
+    return consolidated_all
 
 
 def analyze_document_font_profile(page_spans_dict: dict, config: dict) -> dict:
@@ -566,7 +744,6 @@ def process_single_pdf_to_pdfedit(
 ) -> tuple[list[str], bool]:
     """
     Converts one PDF into BOTH .pdfedit and .pdfeditlight packages in a single pass with atomic write safety.
-    Returns: ([output_bundle_paths], was_skipped)
     """
     start_time = time.time()
     pdf_path = os.path.abspath(source_pdf_path)
@@ -578,7 +755,7 @@ def process_single_pdf_to_pdfedit(
     tmp_full_path = os.path.join(output_dir, f"{base_name}.tmp.pdfedit")
     tmp_light_path = os.path.join(output_dir, f"{base_name}.tmp.pdfeditlight")
 
-    # 1. Resumability Check: Verify if both bundles already exist and are intact
+    # Resumability Check
     full_exists = is_bundle_complete_and_valid(out_full_path, password=password)
     light_exists = is_bundle_complete_and_valid(out_light_path, password=password)
 
@@ -749,19 +926,20 @@ def process_single_pdf_to_pdfedit(
                             "source": "column_clamped_recovery"
                         })
 
-    final_tables = merge_candidates(docling_tables + pymupdf_tables + recovered_tables, CONFIG["iou_overlap_threshold"], CONFIG["enclosure_threshold"])
-    final_images = merge_candidates(docling_pictures + pymupdf_images, CONFIG["iou_overlap_threshold"], CONFIG["enclosure_threshold"])
+    # Merge candidates of each individual type first
+    final_tables_raw = merge_candidate_rectangles(docling_tables + pymupdf_tables + recovered_tables, CONFIG["gutter_tolerance"])
+    final_images_raw = merge_candidate_rectangles(docling_pictures + pymupdf_images, CONFIG["gutter_tolerance"])
 
-    # 5. Build Final Elements with Captions & Footnotes
-    elements = []
-    page_rects_map = {p_idx: [] for p_idx in range(total_pages)}
-    page_metas_map = {p_idx: [] for p_idx in range(total_pages)}
-
+    # 5. Build Initial Raw Elements (Images and Tables with Captions)
     def parse_rect(b, pw, ph):
-        return pymupdf.Rect(max(0.0, min(float(b["x1"]), pw)), max(0.0, min(float(b["y1"]), ph)),
-                            max(0.0, min(float(b["x2"]), pw)), max(0.0, min(float(b["y2"]), ph)))
+        return pymupdf.Rect(
+            max(0.0, min(float(b["x1"]), pw)), max(0.0, min(float(b["y1"]), ph)),
+            max(0.0, min(float(b["x2"]), pw)), max(0.0, min(float(b["y2"]), ph))
+        )
 
-    for idx, img in enumerate(final_images, start=1):
+    raw_elements = []
+
+    for img in final_images_raw:
         p_num = img["page"]
         pw, ph = page_widths[p_num], page_heights[p_num]
         cap = find_figure_caption(p_num, img["bbox"], page_docling_blocks, page_heights, font_profile)
@@ -776,21 +954,19 @@ def process_single_pdf_to_pdfedit(
             u_rect = pymupdf.Rect(min(u_rect.x0, r.x0), min(u_rect.y0, r.y0), max(u_rect.x1, r.x1), max(u_rect.y1, r.y1))
 
         comb_box = {"x1": round(u_rect.x0, 2), "y1": round(u_rect.y0, 2), "x2": round(u_rect.x1, 2), "y2": round(u_rect.y1, 2)}
-        elem_id = f"img_{idx}"
-        elements.append({
-            "id": elem_id,
+        raw_elements.append({
+            "id": "",
             "type": "image",
             "page": p_num,
             "combined_bbox": comb_box,
             "raw_bbox": raw_box,
             "caption": cap,
+            "top_caption": None,
+            "bottom_notes": None,
             "detection_sources": img["sources"]
         })
-        if 0 <= p_num - 1 < total_pages:
-            page_rects_map[p_num - 1].append([comb_box["x1"], comb_box["y1"], comb_box["x2"], comb_box["y2"]])
-            page_metas_map[p_num - 1].append({"id": elem_id, "type": "image"})
 
-    for idx, tab in enumerate(final_tables, start=1):
+    for tab in final_tables_raw:
         p_num = tab["page"]
         pw, ph = page_widths[p_num], page_heights[p_num]
         top_cap, bottom_notes = find_table_annotations(p_num, tab["bbox"], page_docling_blocks, page_heights, font_profile)
@@ -807,22 +983,36 @@ def process_single_pdf_to_pdfedit(
             u_rect = pymupdf.Rect(min(u_rect.x0, r.x0), min(u_rect.y0, r.y0), max(u_rect.x1, r.x1), max(u_rect.y1, r.y1))
 
         comb_box = {"x1": round(u_rect.x0, 2), "y1": round(u_rect.y0, 2), "x2": round(u_rect.x1, 2), "y2": round(u_rect.y1, 2)}
-        elem_id = f"tab_{idx}"
-        elements.append({
-            "id": elem_id,
+        raw_elements.append({
+            "id": "",
             "type": "table",
             "page": p_num,
             "combined_bbox": comb_box,
             "raw_bbox": raw_box,
+            "caption": None,
             "top_caption": top_cap,
             "bottom_notes": bottom_notes,
             "detection_sources": tab["sources"]
         })
-        if 0 <= p_num - 1 < total_pages:
-            page_rects_map[p_num - 1].append([comb_box["x1"], comb_box["y1"], comb_box["x2"], comb_box["y2"]])
-            page_metas_map[p_num - 1].append({"id": elem_id, "type": "table"})
 
-    # 6. Package State Definitions
+    # ========================================================
+    # 6. UNIVERSAL OVERLAPPING CONSOLIDATION & TYPE RESOLUTION
+    # ========================================================
+    # If all same type -> keep type
+    # If mixed (table + image) -> resolve to image
+    elements = consolidate_overlapping_elements(raw_elements, gutter_tolerance=CONFIG["gutter_tolerance"])
+
+    # Build page guidelines mapping directly from consolidated elements
+    page_rects_map = {p_idx: [] for p_idx in range(total_pages)}
+    page_metas_map = {p_idx: [] for p_idx in range(total_pages)}
+
+    for elem in elements:
+        p_idx = elem["page"] - 1
+        if 0 <= p_idx < total_pages:
+            cb = elem["combined_bbox"]
+            page_rects_map[p_idx].append([cb["x1"], cb["y1"], cb["x2"], cb["y2"]])
+            page_metas_map[p_idx].append({"id": elem["id"], "type": elem["type"]})
+
     serialized_guidelines = {}
     for p_idx, r_list in page_rects_map.items():
         if r_list:
@@ -920,10 +1110,13 @@ def process_single_pdf_to_pdfedit(
     full_sz = os.path.getsize(out_full_path) / (1024 * 1024)
     light_sz = os.path.getsize(out_light_path) / 1024
 
+    final_images_count = len([e for e in elements if e["type"] == "image"])
+    final_tables_count = len([e for e in elements if e["type"] == "table"])
+
     print(f"[✓] Generated in {elapsed:.1f}s:")
     print(f"    • Full Bundle:  {os.path.basename(out_full_path)} ({full_sz:.2f} MB)")
     print(f"    • Lean Package: {os.path.basename(out_light_path)} ({light_sz:.1f} KB)")
-    print(f"    • Elements:     {len(final_images)} images, {len(final_tables)} tables, {len(docling_text_stream)} text nodes")
+    print(f"    • Consolidated: {final_images_count} images, {final_tables_count} tables, {len(docling_text_stream)} text nodes")
 
     return [out_full_path, out_light_path], False
 
@@ -1024,7 +1217,6 @@ def main():
 
     args = parser.parse_args()
 
-    # Password Resolution: CLI Flag -> Environment Variable
     active_password = args.password or os.environ.get("PDFEDIT_PASSWORD")
 
     # Repack Mode
@@ -1051,7 +1243,6 @@ def main():
     print(f"   • Encryption:            {'🔒 Password Protected' if active_password else '🔓 Plain'}")
     print("=" * 75)
 
-    # Initialize Docling converter once for entire batch
     from docling.datamodel.base_models import InputFormat
     from docling.datamodel.pipeline_options import PdfPipelineOptions, HeadingHierarchyOptions
     from docling.document_converter import DocumentConverter, PdfFormatOption
@@ -1089,7 +1280,6 @@ def main():
             else:
                 new_completed += 1
 
-            # Update progress tracker
             tracker.setdefault("items", {})[rel_id] = {
                 "bundle_name": os.path.basename(bundle_paths[0]),
                 "light_bundle_name": os.path.basename(bundle_paths[1]),
@@ -1099,7 +1289,6 @@ def main():
             }
             save_progress_tracker(args.output_dir, tracker)
 
-            # Auto-sync both bundles to GitHub repository if enabled
             if args.git_push and not was_skipped:
                 manifest_file = os.path.join(args.output_dir, PROGRESS_MANIFEST_NAME)
                 files_to_push = bundle_paths + [manifest_file]
