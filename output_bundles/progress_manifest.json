@@ -1,7 +1,7 @@
 {
   "version": "2.0",
-  "last_updated": "2026-08-28T08:08:05Z",
-  "completed_count": 12,
+  "last_updated": "2026-08-28T08:10:05Z",
+  "completed_count": 13,
   "items": {
     "01_1 The Practice of Medicine.pdf": {
       "bundle_name": "01_1 The Practice of Medicine.pdfedit",
@@ -74,6 +74,12 @@
       "source_path": "inputs/12_12 Ethical Issues in Clinical Medicine.pdf",
       "status": "completed",
       "completed_at": "2026-08-28T08:08:05Z"
+    },
+    "13_13 Palliative and End-of-Life Care.pdf": {
+      "bundle_name": "13_13 Palliative and End-of-Life Care.pdfedit",
+      "source_path": "inputs/13_13 Palliative and End-of-Life Care.pdf",
+      "status": "completed",
+      "completed_at": "2026-08-28T08:10:05Z"
     }
   }
 }
