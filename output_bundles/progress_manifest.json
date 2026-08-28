@@ -1,7 +1,7 @@
 {
   "version": "2.0",
-  "last_updated": "2026-08-28T08:06:11Z",
-  "completed_count": 9,
+  "last_updated": "2026-08-28T08:07:06Z",
+  "completed_count": 10,
   "items": {
     "01_1 The Practice of Medicine.pdf": {
       "bundle_name": "01_1 The Practice of Medicine.pdfedit",
@@ -56,6 +56,12 @@
       "source_path": "inputs/09_9 Physician Well-Being.pdf",
       "status": "completed",
       "completed_at": "2026-08-28T08:06:11Z"
+    },
+    "10_10 Diagnosis_ Reducing Errors and Improving Quality.pdf": {
+      "bundle_name": "10_10 Diagnosis_ Reducing Errors and Improving Quality.pdfedit",
+      "source_path": "inputs/10_10 Diagnosis_ Reducing Errors and Improving Quality.pdf",
+      "status": "completed",
+      "completed_at": "2026-08-28T08:07:06Z"
     }
   }
 }
