@@ -1,0 +1,64 @@
+# E:/1405_pdf_editor/.github/workflows/batch_extract.yml
+
+name: Resumable Batch PDF to PDFEdit Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      input_pattern:
+        description: 'Glob pattern or folder for input PDFs'
+        required: false
+        default: 'inputs/**/*.pdf'
+      output_dir:
+        description: 'Output directory for .pdfedit bundles'
+        required: false
+        default: 'output_bundles'
+  schedule:
+    # Optional scheduled run for long batch queues
+    - cron: '0 */6 * * *'
+
+jobs:
+  convert_pdfs:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pymupdf docling rapidocr-onnxruntime
+
+      - name: Run Resumable Extraction Pipeline
+        env:
+          PDFEDIT_PASSWORD: ${{ secrets.PDFEDIT_WORKSPACE_PASSWORD }}
+        run: |
+          python scripts/batch_pdf_to_pdfedit.py \
+            "${{ github.event.inputs.input_pattern || 'inputs/**/*.pdf' }}" \
+            -o "${{ github.event.inputs.output_dir || 'output_bundles' }}" \
+            --resume
+
+      - name: Commit & Push Progress Checkpoints
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add output_bundles/progress_manifest.json
+          git diff --quiet && git diff --staged --quiet || (git commit -m "chore: update extraction progress checkpoints [skip ci]" && git push)
+
+      - name: Upload .pdfedit Bundles as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pdfedit-bundles
+          path: output_bundles/*.pdfedit
+          if-no-files-found: ignore
