@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "last_updated": "2026-08-28T08:58:53Z",
+  "last_updated": "2026-08-28T08:59:26Z",
   "completed_count": 14,
   "items": {
     "01_1 The Practice of Medicine.pdf": {
@@ -26,9 +26,10 @@
     },
     "04_4 Decision-Making in Clinical Medicine.pdf": {
       "bundle_name": "04_4 Decision-Making in Clinical Medicine.pdfedit",
+      "light_bundle_name": "04_4 Decision-Making in Clinical Medicine.pdfeditlight",
       "source_path": "inputs/04_4 Decision-Making in Clinical Medicine.pdf",
       "status": "completed",
-      "completed_at": "2026-08-28T08:27:10Z"
+      "completed_at": "2026-08-28T08:59:26Z"
     },
     "06_6 Screening and Prevention of Disease.pdf": {
       "bundle_name": "06_6 Screening and Prevention of Disease.pdfedit",
