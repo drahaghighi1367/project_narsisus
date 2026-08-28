@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "last_updated": "2026-08-28T09:02:43Z",
+  "last_updated": "2026-08-28T09:03:21Z",
   "completed_count": 14,
   "items": {
     "01_1 The Practice of Medicine.pdf": {
@@ -68,9 +68,10 @@
     },
     "11_11 Racial and Ethnic Disparities in Health Care.pdf": {
       "bundle_name": "11_11 Racial and Ethnic Disparities in Health Care.pdfedit",
+      "light_bundle_name": "11_11 Racial and Ethnic Disparities in Health Care.pdfeditlight",
       "source_path": "inputs/11_11 Racial and Ethnic Disparities in Health Care.pdf",
       "status": "completed",
-      "completed_at": "2026-08-28T08:07:52Z"
+      "completed_at": "2026-08-28T09:03:21Z"
     },
     "12_12 Ethical Issues in Clinical Medicine.pdf": {
       "bundle_name": "12_12 Ethical Issues in Clinical Medicine.pdfedit",
