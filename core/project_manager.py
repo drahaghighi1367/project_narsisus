@@ -260,7 +260,7 @@ class ProjectManager:
         if not doc or not elements:
             return None
 
-        from scripts.batch_extractor2 import get_element_rect
+        from core.utils import get_element_rect
         review_doc = pymupdf.open()
         toc = []
         count = 0
@@ -328,7 +328,7 @@ class ProjectManager:
         include_expanded_reviews: bool = True
     ):
         """Packs active state, page dimensions, expanded review PDFs, and text stream into .pdfedit package."""
-        if not project_path.lower().endswith(".pdfedit"):
+        if not (project_path.lower().endswith(".pdfedit") or ".pdfedit" in project_path.lower()):
             project_path += ".pdfedit"
 
         temp_dir = tempfile.mkdtemp(prefix="pdfedit_save_")

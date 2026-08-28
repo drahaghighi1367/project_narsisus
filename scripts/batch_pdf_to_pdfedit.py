@@ -504,7 +504,7 @@ def save_progress_tracker(output_dir: str, tracker_data: dict):
 
 def is_bundle_complete_and_valid(bundle_path: str, password: str | None = None) -> bool:
     """Verifies that an existing .pdfedit bundle is intact, uncorrupted, and decryptable."""
-    if not os.path.exists(bundle_path) or os.path.getsize(bundle_path) < 1024:
+    if not os.path.exists(bundle_path) or os.path.getsize(bundle_path) < 100:
         return False
     try:
         pdf_path, state, _ = ProjectManager.load_project(bundle_path, password=password)
@@ -513,7 +513,8 @@ def is_bundle_complete_and_valid(bundle_path: str, password: str | None = None) 
             import shutil
             shutil.rmtree(temp_dir, ignore_errors=True)
             return True
-    except Exception:
+    except Exception as e:
+        print(f"[!] Validation check failed for {os.path.basename(bundle_path)}: {e}")
         return False
     return False
 
@@ -538,7 +539,7 @@ def process_single_pdf_to_pdfedit(
     base_name = os.path.splitext(os.path.basename(pdf_path))[0]
     out_bundle_name = f"{base_name}.pdfedit"
     out_bundle_path = os.path.join(output_dir, out_bundle_name)
-    tmp_bundle_path = os.path.join(output_dir, f"{base_name}.pdfedit.tmp")
+    tmp_bundle_path = os.path.join(output_dir, f"{base_name}.tmp.pdfedit")
 
     # 1. Resumability Check: Verify if already processed and uncorrupted
     if resume and is_bundle_complete_and_valid(out_bundle_path, password=password):

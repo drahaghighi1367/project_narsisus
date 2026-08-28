@@ -118,6 +118,57 @@ def get_best_fontname(font_name: str, flags: int) -> str:
         return "helv"
 
 
+def parse_bbox(bbox: dict | list, page_w: float, page_h: float) -> pymupdf.Rect:
+    """Parses bounding box in dict or list format and clamps to page bounds."""
+    if isinstance(bbox, dict):
+        if "x1" in bbox:
+            x0, y0, x1, y1 = float(bbox["x1"]), float(bbox["y1"]), float(bbox["x2"]), float(bbox["y2"])
+        elif "x0" in bbox:
+            x0, y0, x1, y1 = float(bbox["x0"]), float(bbox["y0"]), float(bbox["x1"]), float(bbox["y1"])
+        else:
+            raise KeyError(f"Invalid bbox dict keys: {list(bbox.keys())}")
+    elif isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+        x0, y0, x1, y1 = float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])
+    else:
+        raise ValueError(f"Unsupported bbox type: {type(bbox)}")
+
+    rx0 = max(0.0, min(min(x0, x1), page_w))
+    ry0 = max(0.0, min(min(y0, y1), page_h))
+    rx1 = max(0.0, min(max(x0, x1), page_w))
+    ry1 = max(0.0, min(max(y0, y1), page_h))
+    return pymupdf.Rect(rx0, ry0, rx1, ry1)
+
+
+def merge_rects(rects: list[pymupdf.Rect]) -> pymupdf.Rect | None:
+    valid_rects = [r for r in rects if r is not None and r.width > 0 and r.height > 0]
+    if not valid_rects:
+        return None
+    return pymupdf.Rect(
+        min(r.x0 for r in valid_rects),
+        min(r.y0 for r in valid_rects),
+        max(r.x1 for r in valid_rects),
+        max(r.y1 for r in valid_rects)
+    )
+
+
+def get_element_rect(item: dict, element_type: str, page_w: float, page_h: float) -> pymupdf.Rect | None:
+    """Builds the complete crop rectangle for an element including captions."""
+    if "combined_bbox" in item and item["combined_bbox"]:
+        return parse_bbox(item["combined_bbox"], page_w, page_h)
+
+    raw_b = item.get("raw_bbox") or item.get("image_bbox") or item.get("table_bbox")
+    if not raw_b:
+        return None
+
+    rects = [parse_bbox(raw_b, page_w, page_h)]
+    for sub_key in ("caption", "top_caption", "bottom_notes"):
+        sub_obj = item.get(sub_key)
+        if isinstance(sub_obj, dict) and "bbox" in sub_obj:
+            rects.append(parse_bbox(sub_obj["bbox"], page_w, page_h))
+
+    return merge_rects(rects)
+
+
 def merge_connected_rects(rect_list: list[pymupdf.Rect], eps: float = 0.5) -> list[pymupdf.Rect]:
     """
     Groups touching or overlapping rectangles into connected components
