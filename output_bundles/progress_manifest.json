@@ -1,7 +1,7 @@
 {
   "version": "2.0",
-  "last_updated": "2026-08-28T05:34:45Z",
-  "completed_count": 7,
+  "last_updated": "2026-08-28T05:35:02Z",
+  "completed_count": 8,
   "items": {
     "longman1.pdf": {
       "bundle_name": "longman1.pdfedit",
@@ -44,6 +44,12 @@
       "source_path": "inputs/06_6 Screening and Prevention of Disease.pdf",
       "status": "completed",
       "completed_at": "2026-08-28T05:34:45Z"
+    },
+    "07_7 The Safety and Quality of Health Care.pdf": {
+      "bundle_name": "07_7 The Safety and Quality of Health Care.pdfedit",
+      "source_path": "inputs/07_7 The Safety and Quality of Health Care.pdf",
+      "status": "completed",
+      "completed_at": "2026-08-28T05:35:02Z"
     }
   }
 }
