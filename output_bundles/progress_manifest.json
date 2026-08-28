@@ -1,7 +1,7 @@
 {
   "version": "2.0",
-  "last_updated": "2026-08-28T08:10:05Z",
-  "completed_count": 13,
+  "last_updated": "2026-08-28T08:10:18Z",
+  "completed_count": 14,
   "items": {
     "01_1 The Practice of Medicine.pdf": {
       "bundle_name": "01_1 The Practice of Medicine.pdfedit",
@@ -80,6 +80,12 @@
       "source_path": "inputs/13_13 Palliative and End-of-Life Care.pdf",
       "status": "completed",
       "completed_at": "2026-08-28T08:10:05Z"
+    },
+    "longman1.pdf": {
+      "bundle_name": "longman1.pdfedit",
+      "source_path": "inputs/longman1.pdf",
+      "status": "completed",
+      "completed_at": "2026-08-28T08:10:18Z"
     }
   }
 }
