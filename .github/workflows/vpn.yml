@@ -1,0 +1,118 @@
+name: Ephemeral VPN Gateway
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration_minutes:
+        description: 'Duration to keep the VPN running (in minutes, max 350)'
+        required: true
+        default: '60'
+      enable_debug_logging:
+        description: 'Enable verbose Tailscale logs'
+        type: boolean
+        required: false
+        default: false
+
+jobs:
+  run-vpn:
+    name: Start Ephemeral Exit Node
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Print Diagnostic Banner
+        run: |
+          echo "================================================="
+          echo " Starting GitHub Actions Ephemeral VPN Gateway"
+          echo " Runner IP: $(curl -s https://ifconfig.me)"
+          echo " Target Duration: ${{ github.event.inputs.duration_minutes }} minutes"
+          echo "================================================="
+
+      - name: Configure Kernel Routing & Firewall
+        run: |
+          set -e
+          echo "[-] Enabling IP Forwarding..."
+          sudo sysctl -w net.ipv4.ip_forward=1
+          sudo sysctl -w net.ipv6.conf.all.forwarding=1
+
+          echo "[-] Detecting default network interface..."
+          DEFAULT_IFACE=$(ip route show default | awk '{print $5}' | head -n1)
+          echo "Default Interface detected: $DEFAULT_IFACE"
+
+          echo "[-] Configuring iptables NAT rules..."
+          sudo iptables -t nat -A POSTROUTING -o "$DEFAULT_IFACE" -j MASQUERADE
+          sudo ip6tables -t nat -A POSTROUTING -o "$DEFAULT_IFACE" -j MASQUERADE
+
+          echo "[-] Optimizing UDP throughput..."
+          sudo ethtool -K "$DEFAULT_IFACE" rx-udp-gro-forwarding on rx-gro-list off || true
+
+      - name: Install Tailscale
+        run: |
+          set -e
+          echo "[-] Installing Tailscale..."
+          curl -fsSL https://tailscale.com/install.sh | sh
+
+      - name: Authenticate & Start Exit Node
+        env:
+          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          VERBOSE_LOG: ${{ github.event.inputs.enable_debug_logging }}
+        run: |
+          set -e
+          if [ -z "$TAILSCALE_AUTH_KEY" ]; then
+            echo "::error ::Secret TAILSCALE_AUTH_KEY is not set. Go to repo Settings -> Secrets."
+            exit 1
+          fi
+
+          FLAGS="--advertise-exit-node --ssh --hostname=gh-vpn-runner --accept-routes"
+          
+          echo "[-] Starting Tailscale daemon..."
+          sudo tailscale up --authkey="${TAILSCALE_AUTH_KEY}" ${FLAGS}
+
+          echo "[-] Tailscale Started. Waiting for IP assignment..."
+          sleep 3
+
+      - name: Run Connectivity Self-Tests & Debug Info
+        run: |
+          echo "=================== DIAGNOSTICS ==================="
+          echo "Runner Hostname: $(hostname)"
+          echo "Tailscale IP (v4): $(tailscale ip -4)"
+          echo "Tailscale IP (v6): $(tailscale ip -6)"
+          echo "Public Exit IPv4:  $(curl -s --interface tailscale0 https://ifconfig.me || curl -s https://ifconfig.me)"
+          echo "================= TAILSCALE STATUS ================"
+          tailscale status
+          echo "==================================================="
+
+      - name: Keep-Alive Loop with Heartbeat
+        run: |
+          # Graceful shutdown handler
+          cleanup() {
+            echo "[-] Signal received. Gracefully logging out Tailscale..."
+            sudo tailscale logout || true
+            exit 0
+          }
+          trap cleanup SIGINT SIGTERM
+
+          DURATION_MINUTES=${{ github.event.inputs.duration_minutes }}
+          TOTAL_SECONDS=$((DURATION_MINUTES * 60))
+          ELAPSED=0
+          INTERVAL=30
+
+          echo "==================================================="
+          echo " VPN IS ONLINE AND READY"
+          echo " 1. Open Tailscale on your device"
+          echo " 2. Select 'gh-vpn-runner' as your Exit Node"
+          echo " 3. (Optional) SSH into this runner using: tailscale ssh runner@gh-vpn-runner"
+          echo "==================================================="
+
+          while [ $ELAPSED -lt $TOTAL_SECONDS ]; do
+            REMAINING=$(( (TOTAL_SECONDS - ELAPSED) / 60 ))
+            ACTIVE_CONNS=$(sudo netstat -natp 2>/dev/null | grep ESTABLISHED | wc -l)
+            
+            echo "[Heartbeat $(date +'%T')] Alive | Remaining: ~${REMAINING} min | Active Connections: ${ACTIVE_CONNS}"
+            
+            sleep $INTERVAL
+            ELAPSED=$((ELAPSED + INTERVAL))
+          done
+
+          echo "[-] Time limit reached ($DURATION_MINUTES mins). Shutting down..."
+          sudo tailscale logout
