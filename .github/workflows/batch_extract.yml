@@ -13,9 +13,6 @@ on:
         description: 'Output directory for bundles'
         required: false
         default: 'output_bundles'
-  schedule:
-    # Optional scheduled run for long batch queues
-    - cron: '0 */6 * * *'
 
 jobs:
   convert_pdfs:
@@ -50,8 +47,8 @@ jobs:
           PDFEDIT_PASSWORD: ${{ secrets.PDFEDIT_WORKSPACE_PASSWORD }}
         run: |
           python scripts/batch_pdf_to_pdfedit.py \
-            "${{ github.event.inputs.input_pattern || 'inputs/**/*.pdf' }}" \
-            -o "${{ github.event.inputs.output_dir || 'output_bundles' }}" \
+            "${{ inputs.input_pattern }}" \
+            -o "${{ inputs.output_dir }}" \
             --resume \
             --git-push
 
