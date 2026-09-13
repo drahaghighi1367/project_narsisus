@@ -12,7 +12,7 @@ on:
         description: 'Ensure low-latency Europe Runner (Fail fast if US)'
         type: boolean
         required: true
-        default: true
+        default: false
       enable_rdp:
         description: 'Enable GUI Remote Desktop (XFCE + XRDP)'
         type: boolean
@@ -23,6 +23,11 @@ on:
         required: true
         default: '350'
 
+# Prevents multiple runners from executing simultaneously
+concurrency:
+  group: ephemeral-runner-lock
+  cancel-in-progress: true
+
 jobs:
   ephemeral-runner:
     name: Start Runner Gateway
@@ -31,7 +36,7 @@ jobs:
 
     steps:
       - name: Check Runner Region (Low-Latency Filter)
-        if: ${{ github.event.inputs.require_europe == 'true' }}
+        if: ${{ github.event.inputs.require_europe == 'true' || github.event.inputs.require_europe == true }}
         run: |
           COUNTRY=$(curl -s https://ipinfo.io/country)
           CITY=$(curl -s https://ipinfo.io/city)
@@ -45,7 +50,7 @@ jobs:
           echo "[✓] Runner is in Europe ($CITY, $COUNTRY). Low latency confirmed!"
 
       - name: Enable IPv4/IPv6 Routing, MSS Clamping & BBR (VPN Mode)
-        if: ${{ github.event.inputs.enable_vpn == 'true' }}
+        if: ${{ github.event.inputs.enable_vpn == 'true' || github.event.inputs.enable_vpn == true }}
         run: |
           set -e
           echo "[-] Configuring IP Forwarding, BBR, and TCP Clamping..."
@@ -82,7 +87,7 @@ jobs:
           sudo ethtool -K "$DEFAULT_IFACE" rx-udp-gro-forwarding on rx-gro-list off || true
 
       - name: Install Desktop Environment & Optimize XRDP (RDP Mode)
-        if: ${{ github.event.inputs.enable_rdp == 'true' }}
+        if: ${{ github.event.inputs.enable_rdp == 'true' || github.event.inputs.enable_rdp == true }}
         env:
           RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
         run: |
