@@ -1,49 +1,11 @@
-name: Hello World Action
+name: Custom Workflow
 on:
   workflow_dispatch:
-    inputs:
-      environment:
-        description: 'Target deployment environment'
-        required: true
-        type: choice
-        default: 'staging'
-        options:
-          - staging
-          - production
-          - development
-      dry_run:
-        description: 'Simulate deployment without live changes'
-        required: false
-        type: boolean
-        default: true
-      greeting_recipient:
-        description: 'Name of recipient to greet'
-        required: false
-        type: string
-        default: 'Pilot Engineer'
 
 jobs:
-  say-hello:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Print Hello World & Verify Dynamic Config
-        env:
-          APP_ENV: ${{ vars.APP_ENV }}
-          SAMPLE_SECRET: ${{ secrets.SAMPLE_SECRET }}
-          INPUT_ENV: ${{ inputs.environment }}
-          INPUT_DRY_RUN: ${{ inputs.dry_run }}
-          INPUT_RECIPIENT: ${{ inputs.greeting_recipient }}
-        run: |
-          echo "=========================================="
-          echo "  Hello World from Tauri GH Action Pilot  "
-          echo "=========================================="
-          echo "Recipient:        '$INPUT_RECIPIENT'"
-          echo "Target Env:       '$INPUT_ENV'"
-          echo "Dry Run Flag:     '$INPUT_DRY_RUN'"
-          echo "Repo Var APP_ENV: '$APP_ENV'"
-          if [ -n "$SAMPLE_SECRET" ]; then
-            echo "Secret SAMPLE_SECRET is present (masked by GitHub)"
-          else
-            echo "No SAMPLE_SECRET set yet"
-          fi
-          echo "Run finished cleanly at $(date)"
+      - uses: actions/checkout@v4
+      - name: Run step
+        run: echo "Hello from custom workflow"
